@@ -17,6 +17,7 @@ import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands
 import { GoalError } from '@deepseek-ai/dsh-goal'
 import type { GoalService, GoalRef, GoalView } from '@deepseek-ai/dsh-goal'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { AssistantMessage } from '@deepseek-ai/dsh-llm'
 
@@ -67,6 +68,24 @@ declare module '@deepseek-ai/dsh-session/types' {
     'persist/change': PersistChange
   }
 }
+
+/**
+ * DSH's persistence coordinator refuses required event types it does not know.
+ * Third-party event registration is not exposed by the pinned rc.2 API, so the
+ * compatibility layer adds this plugin-owned whole-value event to the shared
+ * mutable catalog before any restored sessions are materialized. The event is
+ * still namespaced and versioned, and older Harness instances without this
+ * plugin will fail closed instead of silently dropping workflow state.
+ */
+function registerPersistEventType(): void {
+  const catalog = KNOWN_SESSION_EVENT_TYPES as Set<string>
+  if (typeof catalog.add !== 'function') throw new Error('dsh-codex-connect: the pinned Harness cannot register persist session events')
+  catalog.add('persist/change')
+}
+
+// Run at module evaluation time as well as during registration so restored
+// sessions cannot be materialized before the plugin's apply hook runs.
+registerPersistEventType()
 
 type PersistCommand =
   | { readonly kind: 'show' }
@@ -321,6 +340,7 @@ function errorText(value: unknown): string {
  * selects another credential silently.
  */
 export function registerPersistCommand(ctx: Context): { hasActiveWork: () => boolean } {
+  registerPersistEventType()
   const quotaKinds = new WeakMap<Agent, 'waiting-quota' | 'weekly-exhausted'>()
 
   const append = (agent: Agent, state: Omit<PersistState, 'updatedAt'>): PersistState => {
