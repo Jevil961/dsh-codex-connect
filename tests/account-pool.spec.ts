@@ -65,6 +65,21 @@ describe('OpenAICodexCredentialPool', () => {
     await expect(readFile(firstFile, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  it('does not resurrect a removed legacy account after restarting the pool', async () => {
+    const { legacy, manifest } = await paths()
+    const old = new OpenAICodexCredentialStore(legacy)
+    await old.modify(OPENAI_CODEX_PROVIDER, () => Promise.resolve(credential('legacy-account')))
+    const pool = new OpenAICodexCredentialPool(legacy, manifest)
+    const id = await pool.activeAccountId()
+    expect(id).toBeDefined()
+    await pool.removeAccount(id!)
+
+    const restarted = new OpenAICodexCredentialPool(legacy, manifest)
+    await expect(restarted.listAccounts()).resolves.toEqual([])
+    await expect(restarted.read(OPENAI_CODEX_PROVIDER)).resolves.toBeUndefined()
+    await expect(readFile(legacy, 'utf8')).resolves.toContain('legacy-account')
+  })
+
   it('rejects malformed pool metadata and enforces owner-only files', async () => {
     const { legacy, manifest } = await paths()
     await mkdir(join(root!, '.openai-codex-accounts'), { recursive: true })

@@ -362,11 +362,19 @@ export class OpenAICodexCredentialPool implements OpenAICodexCredentialSource {
     this.initialized = (async () => {
       await mkdir(this.accountsDirectory, { recursive: true, mode: 0o700 })
       await withFileLock(this.filename, async () => {
+        // A present manifest is authoritative, including an intentionally
+        // empty pool after the user removed the last account.  The legacy
+        // document stays on disk for rollback, so importing solely because
+        // `accounts` is empty would resurrect a deleted account after a
+        // process restart.
+        const manifestExists = await stat(this.filename).then(() => true).catch(error => {
+          if (isENOENT(error)) return false
+          throw error
+        })
         const existing = await this.readPool()
-        if (existing.accounts.length > 0 || existing.activeAccountId !== undefined) {
+        if (manifestExists) {
           // Keep an old legacy file untouched so a failed upgrade can be
           // rolled back without losing the user's original login.
-          if (!(await stat(this.filename).catch(() => undefined))) await this.writePool(existing)
           return
         }
         const legacy = new OpenAICodexCredentialStore(this.legacyFilename)
