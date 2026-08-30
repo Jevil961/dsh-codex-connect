@@ -38,6 +38,10 @@ import { OpenAICodexTransport } from './transport.ts'
 import type { OpenAICodexTransportV1 } from './transport.ts'
 import { OpenAICodexProxyManager } from './provider-proxy.ts'
 import { OpenAICodexImageAssetStore } from './image-assets.ts'
+import {
+  createOpenAICodexQuotaUsageReader,
+  registerOpenAICodexQuotaRecovery,
+} from './quota-recovery.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -120,6 +124,24 @@ export {
   resolveOpenAICodexSettings,
 } from './settings-contract.ts'
 export type { OpenAICodexSettingsConfig, OpenAICodexStreamTransport } from './settings-contract.ts'
+export {
+  cancellableOpenAICodexQuotaDelay,
+  classifyOpenAICodexQuota,
+  createOpenAICodexQuotaUsageReader,
+  OPENAI_CODEX_FIVE_HOUR_WINDOW_SECONDS,
+  OPENAI_CODEX_QUOTA_MAX_STALE_RESETS,
+  OPENAI_CODEX_QUOTA_RESET_SKEW_MS,
+  OPENAI_CODEX_QUOTA_WAIT_CHUNK_MS,
+  OPENAI_CODEX_WEEKLY_WINDOW_SECONDS,
+  openAICodexQuotaIdForModel,
+  registerOpenAICodexQuotaRecovery,
+} from './quota-recovery.ts'
+export type {
+  OpenAICodexQuotaDecision,
+  OpenAICodexQuotaRecoveryLogger,
+  OpenAICodexQuotaRecoveryOptions,
+  OpenAICodexRequestErrorPayload,
+} from './quota-recovery.ts'
 
 export {
   isOpenAICodexTransportError,
@@ -235,6 +257,8 @@ export interface Config {
   proxyUrl?: string
   /** Streaming transport; SSE is safe for short-lived hosts, WebSocket reuse is opt-in. */
   transport?: OpenAICodexStreamTransport
+  /** Wait for the server-reported five-hour quota reset and retry the same step. */
+  autoWaitForQuota?: boolean
   /**
    * Per-model context-window overrides keyed by catalog model id. Each value
    * replaces the advertised `contextWindow` for that model inside the adapter
@@ -264,6 +288,7 @@ export const Config: z<Config> = z.object({
   enableProxy: z.boolean().default(false),
   proxyUrl: z.string().default(DEFAULT_OPENAI_CODEX_PROXY_URL),
   transport: z.union(['sse', 'websocket', 'websocket-cached', 'auto'] as const).default(DEFAULT_OPENAI_CODEX_TRANSPORT),
+  autoWaitForQuota: z.boolean().default(false),
   contextWindowOverrides: z.transform(
     z.union([z.const(undefined), z.dict(z.union([z.const(null), z.number()]))]),
     parseOpenAICodexContextWindowOverrides,
@@ -443,6 +468,12 @@ export function apply(ctx: Context, config: Config): void {
     ])
     await proxyManager.dispose()
   }, 'dsh-codex-connect: optional capability lifecycle')
+
+  registerOpenAICodexQuotaRecovery(ctx, {
+    enabled: () => resolveOpenAICodexSettings(current()).autoWaitForQuota,
+    readUsage: createOpenAICodexQuotaUsageReader(credentials, proxyManager, resolveProviderProxyUrl),
+    logger: ctx.logger,
+  })
 
   installSettingsSection(ctx, OPENAI_CODEX_SETTINGS_NS, Config, config, {
     validate(value) {

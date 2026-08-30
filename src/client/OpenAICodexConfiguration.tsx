@@ -69,6 +69,7 @@ const CONFIG_FIELDS = [
   'enableProxy',
   'proxyUrl',
   'transport',
+  'autoWaitForQuota',
   'enableSearch',
   'enableImageTool',
   'enableImageGeneration',
@@ -418,6 +419,17 @@ export function OpenAICodexConfiguration({ scope, t }: OpenAICodexConfigurationP
               <option value="websocket-cached">{t('transportWebsocketCached')}</option>
               <option value="websocket">{t('transportWebsocket')}</option>
             </select>
+          </label>
+          <label style={toggleRowStyle}>
+            <input
+              type="checkbox"
+              checked={draft.autoWaitForQuota}
+              onChange={event => { update('autoWaitForQuota', event.currentTarget.checked) }}
+            />
+            <span style={toggleCopyStyle}>
+              <span style={labelStyle}>{t('autoWaitForQuota')}</span>
+              <span style={bodyStyle}>{t('autoWaitForQuotaHelp')}</span>
+            </span>
           </label>
           <div style={{ paddingTop: 4 }}>
             <h3 style={headingStyle}>{t('capabilitiesHeading')}</h3>

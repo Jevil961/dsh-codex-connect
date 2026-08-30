@@ -147,6 +147,7 @@ dsh plugin --profile web exec dsh-codex-connect doctor --json
   config:
     enableProxy: false
     transport: sse
+    autoWaitForQuota: false
     enableSearch: false
     enableImageTool: false
     enableImageGeneration: false
@@ -166,11 +167,16 @@ Codex Connect 默认使用**直连**。代理是可选项，只作用于本插�
 
 `transport` 默认是 `sse`，保留短生命周期进程使用的有限请求路径。长驻 Harness 主机可以显式选择 `websocket-cached`，按 Session 复用 WebSocket 和续接上下文；也可以选择 `websocket`，只复用连接而不复用缓存续接。`auto` 会优先尝试 WebSocket；当该 Session 的 WebSocket 不可用时，固定版本的 pi-ai 运行时会回退到 SSE。这些模式要求随插件锁定的 pi-ai 版本和服务端支持，不会增加模型能力或额度。如果反向代理会关闭空闲 WebSocket，请切回 SSE。设置修改从下一次请求生效，进行中的请求保留其已捕获的传输方式。
 
+### 5 小时额度自动恢复
+
+`autoWaitForQuota` 默认是 `false`。开启后，Codex 请求报告 5 小时窗口耗尽时，插件会重新读取服务端额度，等待返回的重置时间，然后重试同一个失败的模型步骤。用户停止当前回合或 Host 卸载时可以取消等待。周额度耗尽，或额度接口没有可用的重置时间时，不会安排自动等待或换号；短暂错误仍可交给正常的有限重试策略。本设置不会绕过审批，也不会改动当前选择的提供方。
+
 ### 只开启你准备使用的能力
 
 - `enableSearch: true` 会把 Codex 注册为可选择的搜索提供方，不会把它选为 profile 的全局搜索路由。
 - `enableImageTool: true` 会为具备视觉能力的模型启用 `view_image`，用于审批后的本地读取和公网图片获取。
 - `enableImageGeneration: true` 会启用只接受文字描述的图片生成工具。使用你当前 GPT 订阅计划提供的图片生成能力。Codex Connect 会把生成结果的精确原文件保存到插件自有存储，同时另存一份 DSH 附件作为对话预览。
+- `autoWaitForQuota: true` 会启用上面的 5 小时额度等待。周额度耗尽仍会明确停止，需要手动选择账号或提供方。
 
 下图是有人显式开启能力之后的配置示例，不是新安装的默认状态。本中文指南使用中文本地化截图；English 版展示同一状态的英文截图。
 
@@ -204,6 +210,8 @@ Codex Connect 默认使用**直连**。代理是可选项，只作用于本插�
 
 每条进度条都会显示剩余百分比和按本地时区格式化的重置时间。额度窗口、模型资格和重置时间由 OpenAI 返回；数据缺失时界面会显示不可用，不会自行猜测。
 
+开启 `autoWaitForQuota` 后，这些服务端数据也会用于请求恢复：只有未来的 5 小时 `resetAt` 才会安排重试；周额度为零或缺少重置时间都不会触发账号切换。
+
 ### 单独更改默认模型或全局搜索路由
 
 如需把 Codex 模型设为新 agent 的默认模型，需要自行添加或修改独立的 Harness 配置项：
@@ -235,6 +243,7 @@ Codex Connect 默认使用**直连**。代理是可选项，只作用于本插�
 | `enableProxy` | `false` | boolean；除非显式启用，否则使用直连 |
 | `proxyUrl` | `http://127.0.0.1:7890`（未启用的占位值） | 不带凭据的 HTTP(S) proxy origin |
 | `transport` | `sse` | `sse`、`websocket`、`websocket-cached`、`auto`；SSE 是安全默认值 |
+| `autoWaitForQuota` | `false` | boolean；等待未来的 5 小时重置并重试同一步 |
 | `contextWindowOverrides` | 无 | 按模型覆盖 contextWindow 的映射；见下文 |
 | `enableSearch` | `false` | boolean |
 | `enableImageTool` | `false` | boolean |

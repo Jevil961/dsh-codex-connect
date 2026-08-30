@@ -103,6 +103,8 @@ export interface OpenAICodexSettingsConfig {
   contextWindowOverrides: Readonly<Record<string, number>> | undefined
   /** Streaming transport; SSE is the safe default for short-lived hosts. */
   transport: OpenAICodexStreamTransport
+  /** Wait for a server-reported five-hour reset and retry the same request. */
+  autoWaitForQuota: boolean
   enableSearch: boolean
   enableImageTool: boolean
   enableImageGeneration: boolean
@@ -118,6 +120,7 @@ export const DEFAULT_OPENAI_CODEX_SETTINGS: Readonly<OpenAICodexSettingsConfig> 
   proxyUrl: DEFAULT_OPENAI_CODEX_PROXY_URL,
   contextWindowOverrides: undefined,
   transport: DEFAULT_OPENAI_CODEX_TRANSPORT,
+  autoWaitForQuota: false,
   enableSearch: false,
   enableImageTool: false,
   enableImageGeneration: false,
@@ -166,6 +169,7 @@ export function decodeOpenAICodexSettings(value: unknown): OpenAICodexSettingsCo
   const proxyUrl = value['proxyUrl']
   const contextWindowOverrides = value['contextWindowOverrides']
   const transport = value['transport']
+  const autoWaitForQuota = value['autoWaitForQuota']
   const enableSearch = value['enableSearch']
   const enableImageTool = value['enableImageTool']
   const enableImageGeneration = value['enableImageGeneration']
@@ -178,6 +182,7 @@ export function decodeOpenAICodexSettings(value: unknown): OpenAICodexSettingsCo
   if (proxyUrl !== undefined && (typeof proxyUrl !== 'string' || !isValidOpenAICodexProxyUrl(proxyUrl))) return undefined
   if (contextWindowOverrides !== undefined && contextWindowOverrides !== null && !isValidOpenAICodexContextWindowOverrides(contextWindowOverrides)) return undefined
   if (transport !== undefined && !isValidOpenAICodexTransport(transport)) return undefined
+  if (autoWaitForQuota !== undefined && typeof autoWaitForQuota !== 'boolean') return undefined
   if (typeof enableSearch !== 'boolean' || typeof enableImageTool !== 'boolean') return undefined
   // Older Host snapshots predate image generation; absence maps to its safe default.
   if (enableImageGeneration !== undefined && typeof enableImageGeneration !== 'boolean') return undefined
@@ -192,6 +197,7 @@ export function decodeOpenAICodexSettings(value: unknown): OpenAICodexSettingsCo
     proxyUrl: proxyUrl === undefined ? DEFAULT_OPENAI_CODEX_PROXY_URL : normalizeOpenAICodexProxyUrl(proxyUrl)!,
     contextWindowOverrides: overrides === undefined ? undefined : Object.freeze(overrides),
     transport: transport ?? DEFAULT_OPENAI_CODEX_TRANSPORT,
+    autoWaitForQuota: autoWaitForQuota ?? false,
     enableSearch,
     enableImageTool,
     enableImageGeneration: enableImageGeneration ?? false,

@@ -43,6 +43,18 @@ describe('OpenAI Codex proxy settings contract', () => {
     expect(() => resolveOpenAICodexSettings({ transport: 'http' } as never)).toThrow('transport must be')
   })
 
+  it('keeps automatic quota waiting opt-in and validates its boolean wire value', () => {
+    expect(DEFAULT_OPENAI_CODEX_SETTINGS.autoWaitForQuota).toBe(false)
+    expect(decodeOpenAICodexSettings({
+      ...DEFAULT_OPENAI_CODEX_SETTINGS,
+      autoWaitForQuota: true,
+    })?.autoWaitForQuota).toBe(true)
+    expect(decodeOpenAICodexSettings({
+      ...DEFAULT_OPENAI_CODEX_SETTINGS,
+      autoWaitForQuota: 'yes',
+    })).toBeUndefined()
+  })
+
   it('rejects unsafe active proxy values while preserving explicit activation semantics', () => {
     expect(decodeOpenAICodexSettings({
       enableProxy: true,

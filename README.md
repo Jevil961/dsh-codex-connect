@@ -147,6 +147,7 @@ The installed bundle is intentionally inert beyond model-provider registration:
   config:
     enableProxy: false
     transport: sse
+    autoWaitForQuota: false
     enableSearch: false
     enableImageTool: false
     enableImageGeneration: false
@@ -166,11 +167,16 @@ Choose **Use this proxy** only after reviewing a candidate, then click **Save ch
 
 `transport` defaults to `sse`, preserving the finite-request path used by short-lived processes. A long-running Harness host can explicitly select `websocket-cached` to reuse a per-session WebSocket and continuation context, or `websocket` to reuse the connection without cached continuation. `auto` prefers WebSocket and lets the pinned pi-ai runtime fall back to SSE when WebSocket is unavailable for that session. These modes require the bundled pi-ai version and server support; they do not increase model capability or quota. If a reverse proxy closes idle WebSockets, switch the profile back to SSE. A changed setting applies to the next request; an in-flight request keeps its captured transport.
 
+### Automatic five-hour quota recovery
+
+`autoWaitForQuota` defaults to `false`. When enabled, a Codex request that reports an exhausted five-hour window reads the current server usage, waits until the returned reset time, and retries the same failed model step. The wait is cancellable when the user stops the turn or the Host unloads. If the weekly window is exhausted, or the usage endpoint does not provide a usable reset time, no automatic wait or account rotation is scheduled; the normal finite retry policy may handle a transient failure. This setting never bypasses approvals or changes the selected provider.
+
 ### Enable only the capability you intend to use
 
 - `enableSearch: true` registers Codex as an available search provider. It does not select the profile's global search route.
 - `enableImageTool: true` enables `view_image` for approved local reads and public-network image fetches on vision-capable models.
 - `enableImageGeneration: true` enables the prompt-only image generation tool. Use the image generation capability included with your current GPT subscription. Codex Connect preserves the exact generated file in plugin-owned storage and saves a DSH attachment as the conversation preview.
+- `autoWaitForQuota: true` opts into the five-hour quota wait described above. Weekly exhaustion remains a visible stop that requires a manual account or provider choice.
 
 The screenshot below is an example after someone has explicitly enabled capabilities. It does not show the fresh-install default. This English guide uses the English-localized capture; the Chinese guide shows the matching Chinese-localized state.
 
@@ -204,6 +210,8 @@ After sign-in, the Codex Connect settings card can show several server-reported 
 
 Each bar shows the remaining percentage and its local reset time. OpenAI controls the returned windows, eligibility, and reset values; missing usage data is treated as unavailable rather than guessed.
 
+When `autoWaitForQuota` is enabled, the same server-reported values also drive the request recovery gate. Only a future five-hour `resetAt` can schedule a retry; a weekly zero or missing reset data never triggers an account change.
+
 ### Change a default model or global search route separately
 
 To make a Codex model the default for new agents, add or update the separate Harness row yourself:
@@ -235,6 +243,7 @@ Selecting Codex as the profile's global search route is another explicit change:
 | `enableProxy` | `false` | boolean; direct connection unless explicitly enabled |
 | `proxyUrl` | `http://127.0.0.1:7890` (inactive placeholder) | Credential-free HTTP(S) proxy origin |
 | `transport` | `sse` | `sse`, `websocket`, `websocket-cached`, `auto`; SSE is the safe default |
+| `autoWaitForQuota` | `false` | boolean; wait for a future five-hour reset and retry the same step |
 | `contextWindowOverrides` | none | Per-model context-window override map; see below |
 | `enableSearch` | `false` | boolean |
 | `enableImageTool` | `false` | boolean |

@@ -67,7 +67,7 @@ The value is a full `http://` or `https://` origin including its port, not a bar
 
 ## Optional configuration
 
-Use **Settings → Plugins → Plugin configuration → Codex Connect** for live, staged Save/Discard edits. The same card controls `enableSearch`, `enableImageTool`, and `enableImageGeneration`; all three default to `false`. Enabling image generation uses the image generation capability included with the current GPT subscription and saves results as DSH attachments. Enabling search registers a provider but does not select it; selecting `web.searchProvider: openai-codex` is a second explicit profile change. Setting `agent-default-model` to `openai-codex` is also a separate explicit change.
+Use **Settings → Plugins → Plugin configuration → Codex Connect** for live, staged Save/Discard edits. The same card controls `enableSearch`, `enableImageTool`, `enableImageGeneration`, and `autoWaitForQuota`; all optional capabilities default to `false`. Enabling image generation uses the image generation capability included with the current GPT subscription and saves results as DSH attachments. Enabling search registers a provider but does not select it; selecting `web.searchProvider: openai-codex` is a second explicit profile change. Setting `agent-default-model` to `openai-codex` is also a separate explicit change. `autoWaitForQuota` waits for a server-reported five-hour reset and retries the same step; it does not rotate accounts or buy credits when the weekly window is exhausted.
 
 Apply only requested choices and preserve unrelated keys:
 
@@ -77,6 +77,7 @@ Apply only requested choices and preserve unrelated keys:
     enableSearch: true
     enableImageTool: false
     enableImageGeneration: false
+    autoWaitForQuota: false
     searchMode: live
 
 - id: web

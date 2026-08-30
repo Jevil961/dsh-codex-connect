@@ -4,7 +4,7 @@
 
 本包通过 Harness 公共 `LlmRuntime` 与 `PiAiAdapter` 注册 `openai-codex`。主模型路径不是一次性 subagent，而是标准 Harness agent loop，因此原生工具审批、权限策略、流式输出、附件解析、reasoning replay、会话持久化、压缩与恢复均保持有效。
 
-bundle patch 只插入 `llm-openai-codex`，不会写入 `agent-default-model` 或 `web.searchProvider`。`enableSearch` 与 `enableImageTool` 默认均为 `false`；关闭时不会注册对应可选服务。
+bundle patch 只插入 `llm-openai-codex`，不会写入 `agent-default-model` 或 `web.searchProvider`。`enableSearch`、`enableImageTool` 与 `autoWaitForQuota` 默认均为 `false`；关闭时不会注册对应可选服务。`autoWaitForQuota` 只在选中账号的 5 小时窗口返回未来 `resetAt` 时等待并重试同一个失败步骤；周额度为零、缺少重置时间或额度查询失败时停止/交给正常恢复，不会轮换凭据或购买额度。
 
 Host 将 `llm-openai-codex` 注册为插件自有的能力 settings namespace。DSH 的 `llm-pi-ai` catalog 持有 `openai-codex` 可配置 provider 目录条目，Codex Connect 只注册实际 adapter，不重复声明该条目。浏览器通过 Harness settings-scope transport 绑定插件 namespace，把账户、额度以及带保存/放弃的能力配置放在现有“插件配置”卡片中。带 revision 防护的逐字段写入不会覆盖无关设置；提交后会即时协调搜索与图片能力的注册状态，且绝不写入默认模型或全局搜索 namespace。
 
