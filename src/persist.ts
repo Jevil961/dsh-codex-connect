@@ -575,43 +575,53 @@ export function registerPersistCommand(ctx: Context): { hasActiveWork: () => boo
     const current = stateOf(agent)
     if (current === undefined) return
     if (event.type === 'assistant/message') {
-      quotaKinds.delete(agent)
+      // Session.append deliberately rejects re-entrant appends while it is
+      // publishing an event. Defer all workflow mutations until the current
+      // publication boundary has closed, and ignore a response if a command
+      // changed the state in the meantime.
+      const phaseAtEvent = current.phase
+      const stateSignatureAtEvent = JSON.stringify(current)
       const text = assistantText(event.data.message)
-      if (current.phase === 'planning' || current.phase === 'needs-input' || current.phase === 'awaiting-confirmation') {
-        const plan = parsePersistPlan(text)
-        if (plan !== undefined) {
-          setState(agent, {
-            phase: plan.questions === null ? 'awaiting-confirmation' : 'needs-input',
-            plan: plan.plan,
-            questions: plan.questions,
-            addendum: null,
-            reason: null,
-          })
-        }
-        return
-      }
-      if (current.phase === 'running' || current.phase === 'waiting-quota') {
-        const signals = parsePersistExecutionSignals(text)
-        if (signals.addendum !== null) {
-          const goals = goalsOf(ctx)
-          const goal = goals?.get(agent)
-          if (goal !== undefined && goal.phase === 'active') {
-            try { goals?.pause(agent, goalRef(goal)) } catch (error: unknown) { ctx.logger.warn(`dsh-codex-connect: could not pause for persist addendum: ${errorText(error)}`) }
+      queueMicrotask(() => {
+        const latest = stateOf(agent)
+        if (latest === undefined || JSON.stringify(latest) !== stateSignatureAtEvent) return
+        quotaKinds.delete(agent)
+        if (phaseAtEvent === 'planning' || phaseAtEvent === 'needs-input' || phaseAtEvent === 'awaiting-confirmation') {
+          const plan = parsePersistPlan(text)
+          if (plan !== undefined) {
+            setState(agent, {
+              phase: plan.questions === null ? 'awaiting-confirmation' : 'needs-input',
+              plan: plan.plan,
+              questions: plan.questions,
+              addendum: null,
+              reason: null,
+            })
           }
-          setState(agent, { phase: 'awaiting-confirmation', addendum: signals.addendum, reason: 'An unapproved scope addendum is waiting for your confirmation.' })
-        } else if (signals.done) {
-          const goals = goalsOf(ctx)
-          const goal = goals?.get(agent)
-          if (goal !== undefined && goal.phase !== 'complete') {
-            try { goals?.complete(agent, goalRef(goal)) } catch (error: unknown) { ctx.logger.warn(`dsh-codex-connect: could not complete persist goal: ${errorText(error)}`) }
-          }
-          setState(agent, { phase: 'complete', reason: 'The agent reported completion and verification.' })
-        } else if (current.phase === 'waiting-quota') {
-          // A successful assistant message after the recovery wait means the
-          // same account resumed normally.
-          setState(agent, { phase: 'running', reason: null })
+          return
         }
-      }
+        if (phaseAtEvent === 'running' || phaseAtEvent === 'waiting-quota') {
+          const signals = parsePersistExecutionSignals(text)
+          if (signals.addendum !== null) {
+            const goals = goalsOf(ctx)
+            const goal = goals?.get(agent)
+            if (goal !== undefined && goal.phase === 'active') {
+              try { goals?.pause(agent, goalRef(goal)) } catch (error: unknown) { ctx.logger.warn(`dsh-codex-connect: could not pause for persist addendum: ${errorText(error)}`) }
+            }
+            setState(agent, { phase: 'awaiting-confirmation', addendum: signals.addendum, reason: 'An unapproved scope addendum is waiting for your confirmation.' })
+          } else if (signals.done) {
+            const goals = goalsOf(ctx)
+            const goal = goals?.get(agent)
+            if (goal !== undefined && goal.phase !== 'complete') {
+              try { goals?.complete(agent, goalRef(goal)) } catch (error: unknown) { ctx.logger.warn(`dsh-codex-connect: could not complete persist goal: ${errorText(error)}`) }
+            }
+            setState(agent, { phase: 'complete', reason: 'The agent reported completion and verification.' })
+          } else if (phaseAtEvent === 'waiting-quota') {
+            // A successful assistant message after the recovery wait means the
+            // same account resumed normally.
+            setState(agent, { phase: 'running', reason: null })
+          }
+        }
+      })
       return
     }
     if (event.type === 'persist/change') return
