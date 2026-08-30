@@ -37,6 +37,17 @@ export type OpenAICodexSearchMode = 'cached' | 'indexed' | 'live'
 /** Search-context sizes accepted by the Codex standalone search endpoint. */
 export type OpenAICodexSearchContextSize = 'low' | 'medium' | 'high'
 
+/** Streaming transports exposed by pi-ai for a long-running Harness host. */
+export type OpenAICodexStreamTransport = 'sse' | 'websocket' | 'websocket-cached' | 'auto'
+
+/** Safe one-shot default; WebSocket reuse is an explicit NAS opt-in. */
+export const DEFAULT_OPENAI_CODEX_TRANSPORT: OpenAICodexStreamTransport = 'sse'
+
+/** Whether a transport value is understood by the pinned pi-ai runtime. */
+export function isValidOpenAICodexTransport(value: unknown): value is OpenAICodexStreamTransport {
+  return value === 'sse' || value === 'websocket' || value === 'websocket-cached' || value === 'auto'
+}
+
 /**
  * Whether a value is a bounded per-model context-window override map. Keys
  * are nonempty, unpadded model ids; values are positive safe integers or null
@@ -90,6 +101,8 @@ export interface OpenAICodexSettingsConfig {
    * output-token limits, or the deployment's compaction policy.
    */
   contextWindowOverrides: Readonly<Record<string, number>> | undefined
+  /** Streaming transport; SSE is the safe default for short-lived hosts. */
+  transport: OpenAICodexStreamTransport
   enableSearch: boolean
   enableImageTool: boolean
   enableImageGeneration: boolean
@@ -104,6 +117,7 @@ export const DEFAULT_OPENAI_CODEX_SETTINGS: Readonly<OpenAICodexSettingsConfig> 
   enableProxy: false,
   proxyUrl: DEFAULT_OPENAI_CODEX_PROXY_URL,
   contextWindowOverrides: undefined,
+  transport: DEFAULT_OPENAI_CODEX_TRANSPORT,
   enableSearch: false,
   enableImageTool: false,
   enableImageGeneration: false,
@@ -125,6 +139,9 @@ export function resolveOpenAICodexSettings(
   const resolved = { ...DEFAULT_OPENAI_CODEX_SETTINGS, ...value }
   if (!isValidOpenAICodexProxyUrl(resolved.proxyUrl)) {
     throw new TypeError('OpenAI Codex proxyUrl must be an HTTP(S) origin without credentials or a path')
+  }
+  if (!isValidOpenAICodexTransport(resolved.transport)) {
+    throw new TypeError('OpenAI Codex transport must be sse, websocket, websocket-cached, or auto')
   }
   return { ...resolved, contextWindowOverrides: resolveOpenAICodexContextWindowOverrides(resolved.contextWindowOverrides) }
 }
@@ -148,6 +165,7 @@ export function decodeOpenAICodexSettings(value: unknown): OpenAICodexSettingsCo
   const enableProxy = value['enableProxy']
   const proxyUrl = value['proxyUrl']
   const contextWindowOverrides = value['contextWindowOverrides']
+  const transport = value['transport']
   const enableSearch = value['enableSearch']
   const enableImageTool = value['enableImageTool']
   const enableImageGeneration = value['enableImageGeneration']
@@ -159,6 +177,7 @@ export function decodeOpenAICodexSettings(value: unknown): OpenAICodexSettingsCo
   if (enableProxy !== undefined && typeof enableProxy !== 'boolean') return undefined
   if (proxyUrl !== undefined && (typeof proxyUrl !== 'string' || !isValidOpenAICodexProxyUrl(proxyUrl))) return undefined
   if (contextWindowOverrides !== undefined && contextWindowOverrides !== null && !isValidOpenAICodexContextWindowOverrides(contextWindowOverrides)) return undefined
+  if (transport !== undefined && !isValidOpenAICodexTransport(transport)) return undefined
   if (typeof enableSearch !== 'boolean' || typeof enableImageTool !== 'boolean') return undefined
   // Older Host snapshots predate image generation; absence maps to its safe default.
   if (enableImageGeneration !== undefined && typeof enableImageGeneration !== 'boolean') return undefined
@@ -172,6 +191,7 @@ export function decodeOpenAICodexSettings(value: unknown): OpenAICodexSettingsCo
     enableProxy: enableProxy ?? false,
     proxyUrl: proxyUrl === undefined ? DEFAULT_OPENAI_CODEX_PROXY_URL : normalizeOpenAICodexProxyUrl(proxyUrl)!,
     contextWindowOverrides: overrides === undefined ? undefined : Object.freeze(overrides),
+    transport: transport ?? DEFAULT_OPENAI_CODEX_TRANSPORT,
     enableSearch,
     enableImageTool,
     enableImageGeneration: enableImageGeneration ?? false,

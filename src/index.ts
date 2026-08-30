@@ -94,11 +94,14 @@ import {
   OpenAICodexSearchProvider,
 } from './search.ts'
 import type { OpenAICodexSearchContextSize, OpenAICodexSearchMode } from './search.ts'
+import type { OpenAICodexStreamTransport } from './settings-contract.ts'
 import { OpenAICodexCredentialStore, OPENAI_CODEX_PROVIDER } from './store.ts'
 import {
   DEFAULT_OPENAI_CODEX_PROXY_URL,
+  DEFAULT_OPENAI_CODEX_TRANSPORT,
   OPENAI_CODEX_SETTINGS_NAMESPACE,
   isValidOpenAICodexProxyUrl,
+  isValidOpenAICodexTransport,
   resolveOpenAICodexProxyUrl,
   resolveOpenAICodexSettings,
   parseOpenAICodexContextWindowOverrides,
@@ -108,13 +111,15 @@ export {
   decodeOpenAICodexSettings,
   DEFAULT_OPENAI_CODEX_PROXY_URL,
   DEFAULT_OPENAI_CODEX_SETTINGS,
+  DEFAULT_OPENAI_CODEX_TRANSPORT,
   isValidOpenAICodexContextWindowOverrides,
   isValidOpenAICodexProxyUrl,
+  isValidOpenAICodexTransport,
   OPENAI_CODEX_SETTINGS_NAMESPACE,
   resolveOpenAICodexProxyUrl,
   resolveOpenAICodexSettings,
 } from './settings-contract.ts'
-export type { OpenAICodexSettingsConfig } from './settings-contract.ts'
+export type { OpenAICodexSettingsConfig, OpenAICodexStreamTransport } from './settings-contract.ts'
 
 export {
   isOpenAICodexTransportError,
@@ -228,6 +233,8 @@ export interface Config {
   enableProxy?: boolean
   /** Credential-free HTTP(S) proxy origin. */
   proxyUrl?: string
+  /** Streaming transport; SSE is safe for short-lived hosts, WebSocket reuse is opt-in. */
+  transport?: OpenAICodexStreamTransport
   /**
    * Per-model context-window overrides keyed by catalog model id. Each value
    * replaces the advertised `contextWindow` for that model inside the adapter
@@ -256,6 +263,7 @@ export const Config: z<Config> = z.object({
   models: z.union([z.const(undefined), z.array(z.string())]),
   enableProxy: z.boolean().default(false),
   proxyUrl: z.string().default(DEFAULT_OPENAI_CODEX_PROXY_URL),
+  transport: z.union(['sse', 'websocket', 'websocket-cached', 'auto'] as const).default(DEFAULT_OPENAI_CODEX_TRANSPORT),
   contextWindowOverrides: z.transform(
     z.union([z.const(undefined), z.dict(z.union([z.const(null), z.number()]))]),
     parseOpenAICodexContextWindowOverrides,
@@ -305,6 +313,7 @@ export function apply(ctx: Context, config: Config): void {
       proxyManager,
       resolveProviderProxyUrl,
       () => resolveOpenAICodexSettings(current()).contextWindowOverrides,
+      () => resolveOpenAICodexSettings(current()).transport,
     ),
   )
   ctx.inject(['webServer'], webCtx => {

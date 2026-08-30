@@ -146,6 +146,7 @@ dsh plugin --profile web exec dsh-codex-connect doctor --json
 - id: llm-openai-codex
   config:
     enableProxy: false
+    transport: sse
     enableSearch: false
     enableImageTool: false
     enableImageGeneration: false
@@ -160,6 +161,10 @@ Codex Connect 默认使用**直连**。代理是可选项，只作用于本插�
 点击 **检测代理** 时，只会测试标准代理环境变量，以及文档列出的本机候选地址：`127.0.0.1:7890`、`127.0.0.1:7897` 和 `127.0.0.1:10809`。检测不调用模型、不消耗额度，也不会写入设置。规范 Codex 端点返回任何 HTTP 响应都表示网络可达；`401/403`、代理 `407`、DNS、连接被拒绝、超时、TLS 和 CONNECT 失败会分别显示为诊断类别。
 
 请先检查候选地址，再选择 **使用此代理**，最后点击 **保存更改**。**手动配置**可以先测试一个不带凭据的 HTTP(S) proxy origin，再启用它。**停用代理**始终可用。检测失败会保留原来的模式；代理已启用但请求失败时，界面会给出可操作的错误，绝不会静默改走直连。
+
+### 长驻 NAS 的流式传输方式
+
+`transport` 默认是 `sse`，保留短生命周期进程使用的有限请求路径。长驻 Harness 主机可以显式选择 `websocket-cached`，按 Session 复用 WebSocket 和续接上下文；也可以选择 `websocket`，只复用连接而不复用缓存续接。`auto` 会优先尝试 WebSocket；当该 Session 的 WebSocket 不可用时，固定版本的 pi-ai 运行时会回退到 SSE。这些模式要求随插件锁定的 pi-ai 版本和服务端支持，不会增加模型能力或额度。如果反向代理会关闭空闲 WebSocket，请切回 SSE。设置修改从下一次请求生效，进行中的请求保留其已捕获的传输方式。
 
 ### 只开启你准备使用的能力
 
@@ -229,6 +234,7 @@ Codex Connect 默认使用**直连**。代理是可选项，只作用于本插�
 | `models` | 完整目录 | Codex model id 数组；空数组隐藏全部条目 |
 | `enableProxy` | `false` | boolean；除非显式启用，否则使用直连 |
 | `proxyUrl` | `http://127.0.0.1:7890`（未启用的占位值） | 不带凭据的 HTTP(S) proxy origin |
+| `transport` | `sse` | `sse`、`websocket`、`websocket-cached`、`auto`；SSE 是安全默认值 |
 | `contextWindowOverrides` | 无 | 按模型覆盖 contextWindow 的映射；见下文 |
 | `enableSearch` | `false` | boolean |
 | `enableImageTool` | `false` | boolean |
@@ -252,7 +258,7 @@ Codex Connect 默认使用**直连**。代理是可选项，只作用于本插�
       gpt-5.6-sol: 350000
 ```
 
-键必须与已安装 Codex 目录中的模型 ID 完全一致；未知 ID 会使配置或设置写入明确报错。映射最多包含 256 项，token 数必须是正的安全整数。其他模型保留目录元数据。输出 token 上限、SSE 传输和 DSH 的压缩策略不变。请在独立验证过的服务端上限内，为输出及协议开销预留空间。如果部署设置为在 80% 时压缩，客户端窗口 `350000` 对应的名义阈值是 `280000`；这个算式不证明服务端接受这么大的输入。
+键必须与已安装 Codex 目录中的模型 ID 完全一致；未知 ID 会使配置或设置写入明确报错。映射最多包含 256 项，token 数必须是正的安全整数。其他模型保留目录元数据。输出 token 上限和 DSH 的压缩策略不变；连接生命周期另由 `transport` 选择。请在独立验证过的服务端上限内，为输出及协议开销预留空间。如果部署设置为在 80% 时压缩，客户端窗口 `350000` 对应的名义阈值是 `280000`；这个算式不证明服务端接受这么大的输入。
 
 插件加载时会应用持久化的 Host 设置，运行中修改会作用于下一次模型解析或请求准备。已经准备好的请求保留当时的预算快照。原始模型目录不会被修改。
 
@@ -296,7 +302,7 @@ dsh plugin --profile web exec dsh-codex-connect capabilities --model gpt-5.6-sol
 
 报告为每项检查标注 `supported`（可用）、`rejected`（拒绝）或 `unknown`（未验证），并提供原因与修复动作。运行时可用仅表示声明的主机包版本匹配，不代表 Web profile 或某个 Node 补丁版本经过集成验证。模型目录条目或私有认证文件只能令模型权限与 OAuth 有效性保持 `unknown`。只有 HTTP 200 有限 SSE 响应包含所选模型完整、非空的助手输出，才能确认独立路由；重定向、超时、限流和不完整流仍为 `unknown`。HTTP 400/404 拒绝的是本次请求，并非所有模型或可选功能；HTTP 401/403 还表示本次请求的授权被拒绝。报告省略 token、账号 ID、路径、代理 origin、响应 ID、headers 和生成文本。
 
-本报告仅涵盖独立路由，不验证活动 profile 路由、搜索/图片工具、浏览器兼容性、provider 重试行为或会话恢复。本插件没有实现自动 provider 故障切换，因此该项为 `rejected`，需要用户明确选择其他 provider。有限 SSE 默认路径不会触发 WebSocket 到 SSE 的回退。`contextManagement` 和续接仍为 `unknown`；原生 compaction 和 WebSocket reuse 在当前集成策略下为 `rejected`。诊断结果不会启用这些能力，也不会更改 Harness 历史。退出码只覆盖运行时、OAuth、所选模型、Responses 和 SSE：`0` 表示五项均可用，`1` 表示至少一项被拒绝，`2` 表示证据未知、选项无效或检查失败。被拒绝的可选能力不影响该退出码。
+本报告仅涵盖独立的有限 SSE 路由，不验证活动 profile 路由、搜索/图片工具、浏览器兼容性、provider 重试行为或会话恢复。本插件没有实现自动 provider 故障切换，因此该项为 `rejected`，需要用户明确选择其他 provider。活动 profile 可以选择 `websocket`、`websocket-cached` 或 `auto`；只有 `auto` 会允许 pi-ai 的 WebSocket 到 SSE 回退，诊断命令不会验证这些选择。`contextManagement` 和续接仍为 `unknown`；连接复用由 profile 选择和固定版本的 pi-ai 运行时共同决定。诊断结果不会启用这些能力，也不会更改 Harness 历史。退出码只覆盖运行时、OAuth、所选模型、Responses 和 SSE：`0` 表示五项均可用，`1` 表示至少一项被拒绝，`2` 表示证据未知、选项无效或检查失败。被拒绝的可选能力不影响该退出码。
 
 ## 兼容性与安全边界
 

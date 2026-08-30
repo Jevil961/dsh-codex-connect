@@ -146,6 +146,7 @@ The installed bundle is intentionally inert beyond model-provider registration:
 - id: llm-openai-codex
   config:
     enableProxy: false
+    transport: sse
     enableSearch: false
     enableImageTool: false
     enableImageGeneration: false
@@ -160,6 +161,10 @@ Codex Connect uses a **Direct connection** by default. A proxy is optional and a
 Select **Detect proxy** to test only the standard proxy environment variables and the documented loopback candidates `127.0.0.1:7890`, `127.0.0.1:7897`, and `127.0.0.1:10809`. Detection makes no model call, consumes no quota, and does not write settings. A response from the canonical Codex endpoint proves network reachability; `401/403`, proxy `407`, DNS, refused connection, timeout, TLS, and CONNECT failures remain separate diagnostics.
 
 Choose **Use this proxy** only after reviewing a candidate, then click **Save changes**. **Configure manually** lets you test a credential-free HTTP(S) proxy origin before activation. **Disable proxy** is always available. A failed probe leaves the previous mode unchanged, and an enabled proxy failure is shown as an actionable error; Codex Connect never silently retries the request through a direct connection.
+
+### Streaming transport for long-lived NAS profiles
+
+`transport` defaults to `sse`, preserving the finite-request path used by short-lived processes. A long-running Harness host can explicitly select `websocket-cached` to reuse a per-session WebSocket and continuation context, or `websocket` to reuse the connection without cached continuation. `auto` prefers WebSocket and lets the pinned pi-ai runtime fall back to SSE when WebSocket is unavailable for that session. These modes require the bundled pi-ai version and server support; they do not increase model capability or quota. If a reverse proxy closes idle WebSockets, switch the profile back to SSE. A changed setting applies to the next request; an in-flight request keeps its captured transport.
 
 ### Enable only the capability you intend to use
 
@@ -229,6 +234,7 @@ Selecting Codex as the profile's global search route is another explicit change:
 | `models` | full catalog | Codex model id array; empty hides all entries |
 | `enableProxy` | `false` | boolean; direct connection unless explicitly enabled |
 | `proxyUrl` | `http://127.0.0.1:7890` (inactive placeholder) | Credential-free HTTP(S) proxy origin |
+| `transport` | `sse` | `sse`, `websocket`, `websocket-cached`, `auto`; SSE is the safe default |
 | `contextWindowOverrides` | none | Per-model context-window override map; see below |
 | `enableSearch` | `false` | boolean |
 | `enableImageTool` | `false` | boolean |
@@ -252,7 +258,7 @@ In Plugin configuration, each model row keeps its visibility checkbox and adds *
       gpt-5.6-sol: 350000
 ```
 
-Keys must exactly match models in the installed Codex catalog; unknown ids reject the configuration or settings write with an explicit error. Maps accept at most 256 entries and positive safe-integer token counts. Other models keep their catalog metadata. Output-token limits, transport (SSE), and DSH's compaction policy are unchanged. Leave room for output and protocol overhead below your independently verified server limit. For a deployment configured to compact at 80%, a client window of `350000` gives a nominal threshold of `280000`; this arithmetic is not evidence that the server accepts that input size.
+Keys must exactly match models in the installed Codex catalog; unknown ids reject the configuration or settings write with an explicit error. Maps accept at most 256 entries and positive safe-integer token counts. Other models keep their catalog metadata. Output-token limits and DSH's compaction policy are unchanged; choose `transport` separately for the connection lifecycle. Leave room for output and protocol overhead below your independently verified server limit. For a deployment configured to compact at 80%, a client window of `350000` gives a nominal threshold of `280000`; this arithmetic is not evidence that the server accepts that input size.
 
 Persisted Host settings are applied on plugin load, and changes affect the next model resolution or prepared request. Already prepared requests retain their captured budget. The original catalog is never mutated.
 
@@ -296,7 +302,7 @@ dsh plugin --profile web exec dsh-codex-connect capabilities --model gpt-5.6-sol
 
 The report labels each check `supported`, `rejected`, or `unknown`, with a reason and corrective action. Runtime support means the declared host package versions match, not that the Web profile or an exact Node patch was integration-tested. A catalog entry or private credential file leaves model access and OAuth validity `unknown`. Only an HTTP 200 finite SSE response with a complete, nonempty assistant output for the selected model confirms the standalone route; redirects, timeouts, rate limits, and incomplete streams remain `unknown`. HTTP 400/404 reject the particular request, not every model or optional feature; HTTP 401/403 also reject authorization for that request. Reports omit tokens, account ids, paths, proxy origins, response ids, headers, and generated text.
 
-This report covers only the standalone route, not active profile routing, search/image tools, browser compatibility, provider retry behavior, or session recovery. Automatic provider failover is `rejected` because this plugin does not implement it; select an alternative provider explicitly. WebSocket-to-SSE fallback is inactive with the finite SSE default. `contextManagement` and continuation remain `unknown`; native compaction and WebSocket reuse are `rejected` by the current integration policy. No diagnostic result enables these capabilities or changes Harness history. Exit codes cover runtime, OAuth, selected model, Responses, and SSE only: `0` means all five were supported, `1` means at least one was rejected, and `2` means unknown evidence, invalid options, or an inspection failure. Rejected optional capabilities do not change that exit code.
+This report covers only the standalone finite-SSE route, not active profile routing, search/image tools, browser compatibility, provider retry behavior, or session recovery. Automatic provider failover is `rejected` because this plugin does not implement it; select an alternative provider explicitly. The active profile may opt into `websocket`, `websocket-cached`, or `auto`; only `auto` permits pi-ai's WebSocket-to-SSE fallback, and the report does not exercise that choice. `contextManagement` and continuation remain `unknown`; transport reuse is controlled by the selected profile and the pinned pi-ai runtime. No diagnostic result enables these capabilities or changes Harness history. Exit codes cover runtime, OAuth, selected model, Responses, and SSE only: `0` means all five were supported, `1` means at least one was rejected, and `2` means unknown evidence, invalid options, or an inspection failure. Rejected optional capabilities do not change that exit code.
 
 ## Compatibility and security boundary
 

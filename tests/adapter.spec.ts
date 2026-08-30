@@ -38,6 +38,12 @@ describe('OpenAI Codex rc.2 adapter profile', () => {
     expect(profile.transport).toBe('sse')
   })
 
+  it.each(['sse', 'auto', 'websocket-cached', 'websocket'] as const)('accepts the explicit %s transport', transport => {
+    const profile = createOpenAICodexProfile(openaiCodexProvider(), undefined, undefined, undefined, undefined, transport)
+
+    expect(profile.transport).toBe(transport)
+  })
+
   it('filters discovery while keeping a hidden model resolvable', async () => {
     const catalog = openAICodexModelCatalog()
     expect(catalog.length).toBeGreaterThan(2)

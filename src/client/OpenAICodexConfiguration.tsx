@@ -68,6 +68,7 @@ const CONFIG_FIELDS = [
   'contextWindowOverrides',
   'enableProxy',
   'proxyUrl',
+  'transport',
   'enableSearch',
   'enableImageTool',
   'enableImageGeneration',
@@ -401,6 +402,23 @@ export function OpenAICodexConfiguration({ scope, t }: OpenAICodexConfigurationP
               )}
             </div>
           ) : null}
+          <div style={{ paddingTop: 4 }}>
+            <h3 style={headingStyle}>{t('transportHeading')}</h3>
+            <p style={{ ...bodyStyle, marginTop: 4 }}>{t('transportIntro')}</p>
+          </div>
+          <label style={formFieldStyle}>
+            <span style={labelStyle}>{t('transportMode')}</span>
+            <select
+              style={controlStyle}
+              value={draft.transport}
+              onChange={event => { update('transport', event.currentTarget.value as OpenAICodexSettingsConfig['transport']) }}
+            >
+              <option value="sse">{t('transportSse')}</option>
+              <option value="auto">{t('transportAuto')}</option>
+              <option value="websocket-cached">{t('transportWebsocketCached')}</option>
+              <option value="websocket">{t('transportWebsocket')}</option>
+            </select>
+          </label>
           <div style={{ paddingTop: 4 }}>
             <h3 style={headingStyle}>{t('capabilitiesHeading')}</h3>
             <p style={{ ...bodyStyle, marginTop: 4 }}>{t('capabilitiesIntro')}</p>

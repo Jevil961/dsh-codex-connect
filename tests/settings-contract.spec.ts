@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_OPENAI_CODEX_PROXY_URL,
   DEFAULT_OPENAI_CODEX_SETTINGS,
+  DEFAULT_OPENAI_CODEX_TRANSPORT,
   decodeOpenAICodexSettings,
   isValidOpenAICodexContextWindowOverrides,
+  isValidOpenAICodexTransport,
   resolveOpenAICodexProxyUrl,
   resolveOpenAICodexSettings,
 } from '../src/settings-contract.ts'
@@ -24,6 +26,21 @@ describe('OpenAI Codex proxy settings contract', () => {
     expect(legacy?.enableProxy).toBe(false)
     expect(legacy?.proxyUrl).toBe(DEFAULT_OPENAI_CODEX_PROXY_URL)
     expect(resolveOpenAICodexProxyUrl(legacy ?? {})).toBeUndefined()
+  })
+
+  it('defaults to SSE and accepts only pinned pi-ai transports', () => {
+    expect(DEFAULT_OPENAI_CODEX_SETTINGS.transport).toBe(DEFAULT_OPENAI_CODEX_TRANSPORT)
+    expect(DEFAULT_OPENAI_CODEX_TRANSPORT).toBe('sse')
+    for (const transport of ['sse', 'websocket', 'websocket-cached', 'auto']) {
+      expect(isValidOpenAICodexTransport(transport)).toBe(true)
+      expect(decodeOpenAICodexSettings({
+        ...DEFAULT_OPENAI_CODEX_SETTINGS,
+        transport,
+      })?.transport).toBe(transport)
+    }
+    expect(isValidOpenAICodexTransport('http')).toBe(false)
+    expect(decodeOpenAICodexSettings({ ...DEFAULT_OPENAI_CODEX_SETTINGS, transport: 'http' })).toBeUndefined()
+    expect(() => resolveOpenAICodexSettings({ transport: 'http' } as never)).toThrow('transport must be')
   })
 
   it('rejects unsafe active proxy values while preserving explicit activation semantics', () => {

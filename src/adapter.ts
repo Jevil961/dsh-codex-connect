@@ -13,6 +13,7 @@ import { OPENAI_CODEX_PROVIDER } from './store.ts'
 import type { FastModeRegistry } from './fast-mode.ts'
 import type { OpenAICodexModelCatalogEntry } from './model-contract.ts'
 import type { OpenAICodexProxyManager } from './provider-proxy.ts'
+import type { OpenAICodexStreamTransport } from './settings-contract.ts'
 
 /** Return a detached copy of the complete pi-ai Codex model catalog. */
 export function openAICodexModelCatalog(): readonly OpenAICodexModelCatalogEntry[] {
@@ -114,6 +115,7 @@ export function createOpenAICodexProfile(
   proxyManager?: OpenAICodexProxyManager,
   resolveProxyUrl?: () => string | undefined,
   contextWindowOverrides?: Readonly<Record<string, number>> | undefined,
+  transport: OpenAICodexStreamTransport = OPENAI_CODEX_TRANSPORT,
 ): ResolvedPiAiProviderProfile {
   const effectiveProvider = contextWindowOverrides === undefined
     ? provider
@@ -121,7 +123,7 @@ export function createOpenAICodexProfile(
   return {
     provider: OPENAI_CODEX_PROVIDER,
     displayName: 'OpenAI Codex',
-    transport: OPENAI_CODEX_TRANSPORT,
+    transport,
     streamIdleTimeoutMs: OPENAI_CODEX_STREAM_IDLE_TIMEOUT_MS,
     maxRequestImageBytes: OPENAI_CODEX_MAX_REQUEST_IMAGE_BYTES,
     requestImagePixelBudget: OPENAI_CODEX_REQUEST_IMAGE_PIXEL_BUDGET,
@@ -176,15 +178,19 @@ export function createOpenAICodexAdapter(
   proxyManager?: OpenAICodexProxyManager,
   resolveProxyUrl?: () => string | undefined,
   contextWindowOverrides?: () => Readonly<Record<string, number>> | undefined,
+  transportMode?: () => OpenAICodexStreamTransport,
 ): PiAiAdapter {
   const provider = openaiCodexProvider()
   let profiles: Map<string, ResolvedPiAiProviderProfile> | undefined
   let previousOverrides: Readonly<Record<string, number>> | undefined
+  let previousTransport: OpenAICodexStreamTransport | undefined
   const currentProfiles = (): Map<string, ResolvedPiAiProviderProfile> => {
     const overrides = contextWindowOverrides?.()
-    if (profiles === undefined || !deepEqualJson(previousOverrides, overrides)) {
-      const profile = createOpenAICodexProfile(provider, fastMode, proxyManager, resolveProxyUrl, overrides)
+    const transport = transportMode?.() ?? OPENAI_CODEX_TRANSPORT
+    if (profiles === undefined || !deepEqualJson(previousOverrides, overrides) || previousTransport !== transport) {
+      const profile = createOpenAICodexProfile(provider, fastMode, proxyManager, resolveProxyUrl, overrides, transport)
       previousOverrides = overrides === undefined ? undefined : { ...overrides }
+      previousTransport = transport
       // PiAiAdapter keys snapshots by map identity; captured calls keep the old map.
       profiles = new Map([[OPENAI_CODEX_PROVIDER, profile]])
     }
