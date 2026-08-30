@@ -134,5 +134,78 @@ describe('OpenAI Codex quota recovery', () => {
     expect(next).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('automatic account rotation is disabled'))
   })
-})
 
+  it('rotates the account and retries the same failed step on weekly exhaustion', async () => {
+    const listener = vi.fn()
+    const on = vi.fn((_name: string, callback: unknown) => {
+      listener.mockImplementation(callback as (...args: unknown[]) => unknown)
+      return () => true
+    })
+    const markWeeklyExhausted = vi.fn(async (_resetAt: number | undefined) => undefined)
+    const rotateAccount = vi.fn(async (_model: string | undefined, _signal: AbortSignal) => ({ rotated: true }))
+    const ctx = { on, effect: vi.fn() } as unknown as Context
+    registerOpenAICodexQuotaRecovery(ctx, {
+      enabled: () => true,
+      readUsage: async () => usage({ remainingPercent: 80 }, { remainingPercent: 0, resetAt: Math.floor(NOW_MS / 1_000) + 3_600 }),
+      rotateAccount,
+      markWeeklyExhausted,
+      logger: { info: vi.fn(), warn: vi.fn() },
+    })
+    const next = vi.fn(async () => undefined)
+    await expect(listener({
+      agent: { options: { model: 'gpt-5.6-sol' } },
+      turn: 4,
+      step: 9,
+      provider: 'openai-codex',
+      failure: { code: 'QUOTA', message: 'quota exceeded' },
+      retryPolicy: undefined,
+      signal: new AbortController().signal,
+    }, next)).resolves.toEqual({ kind: 'retry' })
+    expect(markWeeklyExhausted).toHaveBeenCalledOnce()
+    expect(rotateAccount).toHaveBeenCalledOnce()
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it('waits for the earliest weekly reset when every configured account is exhausted', async () => {
+    const resetAt = Math.floor(NOW_MS / 1_000) + 60
+    let now = NOW_MS
+    let reads = 0
+    const listener = vi.fn()
+    const on = vi.fn((_name: string, callback: unknown) => {
+      listener.mockImplementation(callback as (...args: unknown[]) => unknown)
+      return () => true
+    })
+    const sleep = vi.fn(async (_delayMs: number, _signal: AbortSignal): Promise<boolean> => {
+      now = resetAt * 1_000 + 2_000
+      return true
+    })
+    const ctx = { on, effect: vi.fn() } as unknown as Context
+    registerOpenAICodexQuotaRecovery(ctx, {
+      enabled: () => true,
+      readUsage: async () => {
+        reads += 1
+        return reads === 1
+          ? usage({ remainingPercent: 80 }, { remainingPercent: 0, resetAt })
+          : usage({ remainingPercent: 100 }, { remainingPercent: 100, resetAt })
+      },
+      rotateAccount: async () => ({ rotated: false, resetAt }),
+      waitForWeeklyReset: true,
+      sleep,
+      now: () => now,
+      logger: { info: vi.fn(), warn: vi.fn() },
+    })
+    const next = vi.fn(async () => undefined)
+    await expect(listener({
+      agent: { options: { model: 'gpt-5.6-sol' } },
+      turn: 1,
+      step: 1,
+      provider: 'openai-codex',
+      failure: { code: 'QUOTA', message: 'quota exceeded' },
+      retryPolicy: undefined,
+      signal: new AbortController().signal,
+    }, next)).resolves.toEqual({ kind: 'retry' })
+    expect(reads).toBe(2)
+    expect(sleep).toHaveBeenCalledOnce()
+    expect(next).not.toHaveBeenCalled()
+  })
+})

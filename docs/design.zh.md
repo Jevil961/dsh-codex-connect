@@ -4,13 +4,13 @@
 
 本包通过 Harness 公共 `LlmRuntime` 与 `PiAiAdapter` 注册 `openai-codex`。主模型路径不是一次性 subagent，而是标准 Harness agent loop，因此原生工具审批、权限策略、流式输出、附件解析、reasoning replay、会话持久化、压缩与恢复均保持有效。
 
-bundle patch 只插入 `llm-openai-codex`，不会写入 `agent-default-model` 或 `web.searchProvider`。`enableSearch`、`enableImageTool` 与 `autoWaitForQuota` 默认均为 `false`；关闭时不会注册对应可选服务。`autoWaitForQuota` 只在选中账号的 5 小时窗口返回未来 `resetAt` 时等待并重试同一个失败步骤；周额度为零、缺少重置时间或额度查询失败时停止/交给正常恢复，不会轮换凭据或购买额度。
+bundle patch 只插入 `llm-openai-codex`，不会写入 `agent-default-model` 或 `web.searchProvider`。`enableSearch`、`enableImageTool`、`autoWaitForQuota` 与 `autoRotateAccounts` 默认均为 `false`；关闭时不会注册对应可选服务。`autoWaitForQuota` 只在选中账号的 5 小时窗口返回未来 `resetAt` 时等待并重试同一个失败步骤；`autoRotateAccounts`（以及已确认的 `/persist`）会在周额度为零时探测账号池并在选出可用凭据后重试同一步。探测失败或 401 会停止/交给正常恢复，不会购买额度。
 
 ## `/persist` 工作流
 
 Codex Connect 通过 DSH 原生 `dsh-commands` 注册 `/persist`，不另建 Composer。目标、计划、问题、批准的补充项、额度等待和完成状态以 `persist/change` whole-value 事件写入 Session；恢复时从事件日志重新折叠。初始目标只触发只读规划回合，只有用户明确 `/persist confirm` 后才创建 `dsh-goal` 持久目标。目标回合由 Harness 的 Goal round driver 续跑，默认上限为 256 回合。
 
-规划提示要求覆盖痛点、范围、验收、测试、UI/UX、可访问性、性能、部署与回滚，并使用结构化 marker 让插件识别“需要回答问题”或“等待确认”。执行中发现的范围外创意必须以 addendum marker 暂停目标，等待再次确认；普通 Harness 工具与审批策略不被绕过。Codex 5 小时等待仅在已确认的 `/persist` 任务活动时自动启用，周额度耗尽只记录为可恢复状态，账号切换仍需用户显式选择。
+规划提示要求覆盖痛点、范围、验收、测试、UI/UX、可访问性、性能、部署与回滚，并使用结构化 marker 让插件识别“需要回答问题”或“等待确认”。执行中发现的范围外创意必须以 addendum marker 暂停目标，等待再次确认；普通 Harness 工具与审批策略不被绕过。Codex 5 小时等待和账号池轮换仅在已确认的 `/persist` 任务活动时自动启用（或由设置显式打开）。切换只替换下一次请求的 OAuth 凭据，不新建 Harness session，因此对话、计划、工具审批、浏览器上下文和 worktree 记忆保持不变。
 
 Host 将 `llm-openai-codex` 注册为插件自有的能力 settings namespace。DSH 的 `llm-pi-ai` catalog 持有 `openai-codex` 可配置 provider 目录条目，Codex Connect 只注册实际 adapter，不重复声明该条目。浏览器通过 Harness settings-scope transport 绑定插件 namespace，把账户、额度以及带保存/放弃的能力配置放在现有“插件配置”卡片中。带 revision 防护的逐字段写入不会覆盖无关设置；提交后会即时协调搜索与图片能力的注册状态，且绝不写入默认模型或全局搜索 namespace。
 
@@ -18,7 +18,7 @@ profile 默认使用有限的 SSE。长驻 NAS 主机可以显式选择 `websock
 
 ## OAuth 持久化
 
-插件使用 `$DSH_HOME/.openai-codex-auth.json`，与 Codex CLI/Desktop 状态分离。文件格式严格且有版本号；POSIX 上会拒绝组/其他用户可读文件。父目录和文件按仅所有者权限创建，写入采用原子替换，刷新修改使用 Harness 跨进程文件锁，返回给调用方的是凭据副本。浏览器 origin 授权单独存放于 `$DSH_HOME/.openai-codex-trusted-origins.json`，格式为 `version: 1`、`mode: "allowlist"` 和规范化的精确 HTTP(S) origin；其中不含 OAuth 内容，且只能通过独立 CLI 修改。
+插件保留 `$DSH_HOME/.openai-codex-auth.json` 作为回滚源，并在首次使用时导入 `$DSH_HOME/.openai-codex-accounts/`。每个账号使用独立的 owner-only 严格版本化凭据文件；`accounts.json` 只保存不透明 id、标签、额度状态和时间戳，不保存 token。写入采用原子替换，刷新修改使用 Harness 跨进程文件锁，返回给调用方的是凭据副本。浏览器 origin 授权仍单独存放于 `$DSH_HOME/.openai-codex-trusted-origins.json`，其中不含 OAuth 内容，且只能通过独立 CLI 修改。
 
 为兼容迁移，设置页路由、OAuth 路径和 provider id 不改名。浏览器请求默认只允许 loopback；远程请求必须使用当前 sidecar 中的精确有效 HTTP(S) origin，不能带 cross-site Fetch Metadata，若带 Origin 还必须精确匹配。每次请求都会重新读取 sidecar；未知字段或错误 mode 会快速失败。登录挑战只接受不含凭据的 HTTPS 地址；30 秒内未得到地址、provider 已结束但没有地址、退出登录或插件卸载时，所有 waiter 都会被清理。只有显式登录会输出授权 URL 或代码；状态输出会脱敏。doctor 只用 `lstat` 检查元数据，不打开文件。
 

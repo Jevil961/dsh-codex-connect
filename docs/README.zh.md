@@ -28,13 +28,14 @@ dsh plugin --profile web add dsh-codex-connect@alpha
 
 预期结果：包被加入该 profile。这个动作不会更改 profile 的默认模型或全局搜索路由。
 
-如需精确复现这个版本，使用 `dsh plugin --profile web add dsh-codex-connect@0.1.0-alpha.4.21`。对应 GitHub prerelease 已创建但 npm 不可用时，可使用 `dsh plugin --profile web add 'github:franksong2702/dsh-codex-connect#v0.1.0-alpha.4.21'`。本地 checkout 可安装为 `link:/absolute/path/to/dsh-codex-connect`。
+如需精确复现这个版本，使用 `dsh plugin --profile web add dsh-codex-connect@0.1.0-alpha.4.22`。对应 GitHub prerelease 已创建但 npm 不可用时，可使用 `dsh plugin --profile web add 'github:franksong2702/dsh-codex-connect#v0.1.0-alpha.4.22'`。本地 checkout 可安装为 `link:/absolute/path/to/dsh-codex-connect`。
 
-### Alpha 4.21 更新内容
+### Alpha 4.22 更新内容
 
 - 将生成图片的精确原文件与对话预览分开保存和下载，恢复会话及继承了图片结果的 fork 会话同样可用。
 - 使用可选的 `capabilities` 命令检查运行环境与 Responses/SSE 的支持证据。网络探测必须显式传入 `--probe`；不会启用未支持的功能或修改路由。
 - 提供更清晰的精确版本安装指引，并扩展发布与 canary 的 CI 检查。支持的 DSH 版本仍为 `0.1.1-rc.2`。
+- 支持把多个 ChatGPT OAuth 账号保存到持久化账号池，并在周额度耗尽时可选地切换，同时保留原 Harness 会话和记忆。
 
 ### `/persist`：先规划，再持续执行
 
@@ -188,14 +189,21 @@ Codex Connect 默认使用**直连**。代理是可选项，只作用于本插�
 
 ### 5 小时额度自动恢复
 
-`autoWaitForQuota` 默认是 `false`。开启后，Codex 请求报告 5 小时窗口耗尽时，插件会重新读取服务端额度，等待返回的重置时间，然后重试同一个失败的模型步骤。用户停止当前回合或 Host 卸载时可以取消等待。周额度耗尽，或额度接口没有可用的重置时间时，不会安排自动等待或换号；短暂错误仍可交给正常的有限重试策略。本设置不会绕过审批，也不会改动当前选择的提供方。
+`autoWaitForQuota` 默认是 `false`。开启后，Codex 请求报告 5 小时窗口耗尽时，插件会重新读取服务端额度，等待返回的重置时间，然后重试同一个失败的模型步骤。用户停止当前回合或 Host 卸载时可以取消等待。周额度由 `autoRotateAccounts` 单独控制；缺少重置时间或额度查询失败时，绝不会创建无限重试。本设置不会绕过审批，也不会改动当前选择的提供方。
+
+### 账号池与无缝周额度切换
+
+Codex Connect 会把每个明确添加的 ChatGPT 账号保存到 `.openai-codex-accounts/` 下的独立 owner-only 文件。已有 `.openai-codex-auth.json` 会在首次使用时自动导入，并保留为回滚副本。Web 卡片会显示脱敏账号提示，可添加、选择或移除账号；manifest 不保存 access/refresh token。
+
+`autoRotateAccounts` 默认是 `false`。开启后（或已确认的 `/persist` 运行期间），周额度错误会探测其他已配置账号，标记已耗尽或需要重新认证的账号，选出可用账号后重试同一个模型步骤。Harness session、对话历史、计划状态、工具审批、附件、浏览器上下文和 worktree 都不会重建或改变。所有账号都耗尽且存在未来重置时间时，`/persist` 会等待最早的重置；否则请求会暂停并提示处理。切换不会购买额度、绕过审批，也不会把 401 当成额度错误。
 
 ### 只开启你准备使用的能力
 
 - `enableSearch: true` 会把 Codex 注册为可选择的搜索提供方，不会把它选为 profile 的全局搜索路由。
 - `enableImageTool: true` 会为具备视觉能力的模型启用 `view_image`，用于审批后的本地读取和公网图片获取。
 - `enableImageGeneration: true` 会启用只接受文字描述的图片生成工具。使用你当前 GPT 订阅计划提供的图片生成能力。Codex Connect 会把生成结果的精确原文件保存到插件自有存储，同时另存一份 DSH 附件作为对话预览。
-- `autoWaitForQuota: true` 会启用上面的 5 小时额度等待。周额度耗尽仍会明确停止，需要手动选择账号或提供方。
+- `autoWaitForQuota: true` 会启用上面的 5 小时额度等待。
+- `autoRotateAccounts: true` 会启用周额度自动切换。请先在 Codex Connect 卡片添加至少两个账号；失效账号不会被永久静默跳过，需要重新登录。
 
 下图是有人显式开启能力之后的配置示例，不是新安装的默认状态。本中文指南使用中文本地化截图；English 版展示同一状态的英文截图。
 
@@ -263,6 +271,7 @@ Codex Connect 默认使用**直连**。代理是可选项，只作用于本插�
 | `proxyUrl` | `http://127.0.0.1:7890`（未启用的占位值） | 不带凭据的 HTTP(S) proxy origin |
 | `transport` | `sse` | `sse`、`websocket`、`websocket-cached`、`auto`；SSE 是安全默认值 |
 | `autoWaitForQuota` | `false` | boolean；等待未来的 5 小时重置并重试同一步 |
+| `autoRotateAccounts` | `false` | boolean；周额度耗尽时探测并切换已添加账号 |
 | `contextWindowOverrides` | 无 | 按模型覆盖 contextWindow 的映射；见下文 |
 | `enableSearch` | `false` | boolean |
 | `enableImageTool` | `false` | boolean |
@@ -334,7 +343,7 @@ dsh plugin --profile web exec dsh-codex-connect capabilities --model gpt-5.6-sol
 
 ## 兼容性与安全边界
 
-- 当前唯一已验证的兼容组合是 DSH 插件 API packages `0.1.1-rc.2`、`@earendil-works/pi-ai` `0.82.1` 和 Node.js `^22.19.0 || >=24.0.0`；详见 [compatibility.json](../compatibility.json)。Alpha 4.21 使用 rc.2 的 keyed 插件配置 slot；旧版 DSH API packages 用户应升级到 rc.2 API packages。
+- 当前唯一已验证的兼容组合是 DSH 插件 API packages `0.1.1-rc.2`、`@earendil-works/pi-ai` `0.82.1` 和 Node.js `^22.19.0 || >=24.0.0`；详见 [compatibility.json](../compatibility.json)。Alpha 4.22 使用 rc.2 的 keyed 插件配置 slot；旧版 DSH API packages 用户应升级到 rc.2 API packages。
 - 升级时请将 DSH 插件 API packages 与 `@earendil-works/pi-ai` 作为一组升级，再运行 `dsh-codex-connect doctor --json` 和兼容性检查。本契约不对未来版本作判断。
 - 每日上游检查发现新的 DSH `latest` 或 `next` 候选版本时，会把 Codex Connect 安装到隔离 Profile 中，在没有 OAuth 凭据的情况下启动已安装的模型运行时，验证模型与推理强度发现，并确认提供方可被正确卸载。真实登录、额度和模型请求仍需在测试 Profile 中人工验证。
 - ChatGPT 套餐资格、模型权限、额度和后端行为由 OpenAI 控制，可能变化。

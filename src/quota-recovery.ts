@@ -4,7 +4,11 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, RequestErrorAction } from '@deepseek-ai/dsh-agent'
 import type { LlmFailure, ResolvedRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type { OpenAICodexRateLimitWindow, OpenAICodexUsage } from './usage.ts'
-import { OPENAI_CODEX_PROVIDER, type OpenAICodexCredentialStore } from './store.ts'
+import {
+  OPENAI_CODEX_PROVIDER,
+  OpenAICodexCredentialPool,
+  type OpenAICodexCredentialSource,
+} from './store.ts'
 import { readOpenAICodexRateLimits } from './usage.ts'
 import type { OpenAICodexProxyManager } from './provider-proxy.ts'
 
@@ -55,6 +59,16 @@ export interface OpenAICodexQuotaRecoveryOptions {
   readonly now?: () => number
   readonly sleep?: (delayMs: number, signal: AbortSignal) => Promise<boolean>
   readonly maxStaleResets?: number
+  /** Select another authenticated account after weekly exhaustion. */
+  readonly rotateAccount?: (
+    model: string | undefined,
+    signal: AbortSignal,
+  ) => Promise<{ rotated: boolean; resetAt?: number }>
+  /** Persist the exhausted account's state before another request can rotate it. */
+  readonly activeAccountId?: () => Promise<string | undefined>
+  readonly markWeeklyExhausted?: (resetAt: number | undefined, accountId?: string) => Promise<void>
+  /** When every account is exhausted, wait for the earliest known weekly reset. */
+  readonly waitForWeeklyReset?: boolean | (() => boolean)
 }
 
 /** Select the usage bucket associated with a Codex model. */
@@ -189,7 +203,16 @@ export function registerOpenAICodexQuotaRecovery(
     let staleResets = 0
     let lastResetAt: number | undefined
     let waitedForFiveHour = false
+    let waitedForWeekly = false
     while (!payload.signal.aborted && !lifetime.signal.aborted) {
+      let accountAtProbe: string | undefined
+      if (options.activeAccountId !== undefined) {
+        try {
+          accountAtProbe = await options.activeAccountId()
+        } catch {
+          accountAtProbe = undefined
+        }
+      }
       let usage: OpenAICodexUsage
       try {
         usage = await options.readUsage()
@@ -201,6 +224,44 @@ export function registerOpenAICodexQuotaRecovery(
       if (payload.signal.aborted || lifetime.signal.aborted) return undefined
       const decision = classifyOpenAICodexQuota(usage, payload.agent.options.model, now())
       if (decision.kind === 'weekly-exhausted') {
+        if (options.markWeeklyExhausted !== undefined) {
+          await options.markWeeklyExhausted(decision.resetAt, accountAtProbe).catch(() => undefined)
+        }
+        if (options.rotateAccount !== undefined) {
+          let rotation: { rotated: boolean; resetAt?: number }
+          try {
+            rotation = await options.rotateAccount(payload.agent.options.model, payload.signal)
+          } catch {
+            options.logger.warn('dsh-codex-connect: Codex account rotation failed; leaving the request terminal')
+            return undefined
+          }
+          if (payload.signal.aborted || lifetime.signal.aborted) return undefined
+          if (rotation.rotated) {
+            options.logger.info('dsh-codex-connect: Codex weekly quota exhausted; continuing with the next account')
+            return { kind: 'retry' }
+          }
+          const waitForWeeklyReset = typeof options.waitForWeeklyReset === 'function'
+            ? options.waitForWeeklyReset()
+            : options.waitForWeeklyReset === true
+          if (waitForWeeklyReset && rotation.resetAt !== undefined) {
+            if (rotation.resetAt === lastResetAt) staleResets += 1
+            else {
+              staleResets = 0
+              lastResetAt = rotation.resetAt
+            }
+            if (staleResets > maxStaleResets) {
+              options.logger.warn('dsh-codex-connect: Codex weekly reset time did not advance; leaving the request terminal')
+              return undefined
+            }
+            options.logger.info('dsh-codex-connect: all Codex accounts are exhausted; waiting for the earliest weekly reset')
+            const waited = await waitUntil(rotation.resetAt, AbortSignal.any([payload.signal, lifetime.signal]), now, sleep)
+            if (!waited) return undefined
+            waitedForWeekly = true
+            continue
+          }
+          options.logger.warn('dsh-codex-connect: all configured Codex accounts have exhausted their weekly quota')
+          return undefined
+        }
         options.logger.warn('dsh-codex-connect: Codex weekly quota is exhausted; automatic account rotation is disabled')
         return undefined
       }
@@ -208,7 +269,7 @@ export function registerOpenAICodexQuotaRecovery(
         // A successful probe after our timer is the only point at which this
         // listener owns a retry. Before any wait, delegate transient failures
         // to the normal Harness retry policy.
-        return waitedForFiveHour && decision.kind === 'available'
+        return (waitedForFiveHour || waitedForWeekly) && decision.kind === 'available'
           ? { kind: 'retry' }
           : next()
       }
@@ -243,9 +304,83 @@ export function registerOpenAICodexQuotaRecovery(
 
 /** Build a quota probe that follows the active Codex-only proxy scope. */
 export function createOpenAICodexQuotaUsageReader(
-  store: OpenAICodexCredentialStore,
+  store: OpenAICodexCredentialSource,
   proxyManager: OpenAICodexProxyManager,
   resolveProxyUrl: () => string | undefined,
 ): () => Promise<OpenAICodexUsage> {
   return () => proxyManager.run(resolveProxyUrl(), () => readOpenAICodexRateLimits(store))
+}
+
+/**
+ * Probe the account pool and atomically select the first usable account.
+ * Candidate probes use their own file-backed store, so refreshing one account
+ * cannot overwrite another account's token or the active pointer.  A request
+ * that is already streaming keeps its resolved bearer; only the retry sees the
+ * newly selected account, which preserves the original Harness session.
+ */
+export function createOpenAICodexQuotaAccountRotator(
+  pool: OpenAICodexCredentialPool,
+  proxyManager: OpenAICodexProxyManager,
+  resolveProxyUrl: () => string | undefined,
+): (
+  model: string | undefined,
+  signal: AbortSignal,
+) => Promise<{ rotated: boolean; resetAt?: number }> {
+  let rotationTail = Promise.resolve()
+  const rotate = async (model: string | undefined, signal: AbortSignal): Promise<{ rotated: boolean; resetAt?: number }> => {
+    const active = await pool.activeAccountId()
+    const accounts = await pool.listAccounts()
+    let earliestResetAt: number | undefined
+    let unknownCandidate: string | undefined
+    for (const account of accounts) {
+      if (signal.aborted || account.id === active || account.state === 'disabled' || account.state === 'reauth-required') continue
+      const nowSeconds = Date.now() / 1_000
+      if (account.weeklyResetAt !== undefined && account.weeklyResetAt > nowSeconds) {
+        earliestResetAt = earliestResetAt === undefined ? account.weeklyResetAt : Math.min(earliestResetAt, account.weeklyResetAt)
+        continue
+      }
+      if (account.fiveHourResetAt !== undefined && account.fiveHourResetAt > nowSeconds) {
+        earliestResetAt = earliestResetAt === undefined ? account.fiveHourResetAt : Math.min(earliestResetAt, account.fiveHourResetAt)
+      }
+      let usage: OpenAICodexUsage
+      try {
+        const candidate = await pool.storeForAccount(account.id)
+        usage = await proxyManager.run(resolveProxyUrl(), () => readOpenAICodexRateLimits(candidate))
+      } catch (error: unknown) {
+        // A revoked account is kept for manual re-login; transient network
+        // failures remain eligible on the next quota event.
+        if (error instanceof Error && /authorization must be renewed/u.test(error.message)) {
+          await pool.markAccountState(account.id, 'reauth-required')
+        }
+        continue
+      }
+      const decision = classifyOpenAICodexQuota(usage, model)
+      if (decision.kind === 'weekly-exhausted') {
+        await pool.markAccountState(account.id, 'weekly-exhausted', decision.resetAt === undefined ? {} : { weeklyResetAt: decision.resetAt })
+        if (decision.resetAt !== undefined) earliestResetAt = earliestResetAt === undefined ? decision.resetAt : Math.min(earliestResetAt, decision.resetAt)
+        continue
+      }
+      if (decision.kind === 'wait-five-hour') {
+        await pool.markAccountState(account.id, 'five-hour-wait', { fiveHourResetAt: decision.resetAt })
+        earliestResetAt = earliestResetAt === undefined ? decision.resetAt : Math.min(earliestResetAt, decision.resetAt)
+        continue
+      }
+      if (decision.kind === 'unknown') {
+        unknownCandidate ??= account.id
+        continue
+      }
+      await pool.switchActive(account.id)
+      return { rotated: true }
+    }
+    if (unknownCandidate !== undefined) {
+      await pool.switchActive(unknownCandidate)
+      return { rotated: true }
+    }
+    return earliestResetAt === undefined ? { rotated: false } : { rotated: false, resetAt: earliestResetAt }
+  }
+  return (model, signal) => {
+    const operation = rotationTail.then(() => rotate(model, signal))
+    rotationTail = operation.then(() => undefined, () => undefined)
+    return operation
+  }
 }

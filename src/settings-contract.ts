@@ -105,6 +105,8 @@ export interface OpenAICodexSettingsConfig {
   transport: OpenAICodexStreamTransport
   /** Wait for a server-reported five-hour reset and retry the same request. */
   autoWaitForQuota: boolean
+  /** Rotate to another explicitly added account after weekly exhaustion. */
+  autoRotateAccounts: boolean
   enableSearch: boolean
   enableImageTool: boolean
   enableImageGeneration: boolean
@@ -121,6 +123,7 @@ export const DEFAULT_OPENAI_CODEX_SETTINGS: Readonly<OpenAICodexSettingsConfig> 
   contextWindowOverrides: undefined,
   transport: DEFAULT_OPENAI_CODEX_TRANSPORT,
   autoWaitForQuota: false,
+  autoRotateAccounts: false,
   enableSearch: false,
   enableImageTool: false,
   enableImageGeneration: false,
@@ -170,6 +173,7 @@ export function decodeOpenAICodexSettings(value: unknown): OpenAICodexSettingsCo
   const contextWindowOverrides = value['contextWindowOverrides']
   const transport = value['transport']
   const autoWaitForQuota = value['autoWaitForQuota']
+  const autoRotateAccounts = value['autoRotateAccounts']
   const enableSearch = value['enableSearch']
   const enableImageTool = value['enableImageTool']
   const enableImageGeneration = value['enableImageGeneration']
@@ -183,6 +187,7 @@ export function decodeOpenAICodexSettings(value: unknown): OpenAICodexSettingsCo
   if (contextWindowOverrides !== undefined && contextWindowOverrides !== null && !isValidOpenAICodexContextWindowOverrides(contextWindowOverrides)) return undefined
   if (transport !== undefined && !isValidOpenAICodexTransport(transport)) return undefined
   if (autoWaitForQuota !== undefined && typeof autoWaitForQuota !== 'boolean') return undefined
+  if (autoRotateAccounts !== undefined && typeof autoRotateAccounts !== 'boolean') return undefined
   if (typeof enableSearch !== 'boolean' || typeof enableImageTool !== 'boolean') return undefined
   // Older Host snapshots predate image generation; absence maps to its safe default.
   if (enableImageGeneration !== undefined && typeof enableImageGeneration !== 'boolean') return undefined
@@ -198,6 +203,7 @@ export function decodeOpenAICodexSettings(value: unknown): OpenAICodexSettingsCo
     contextWindowOverrides: overrides === undefined ? undefined : Object.freeze(overrides),
     transport: transport ?? DEFAULT_OPENAI_CODEX_TRANSPORT,
     autoWaitForQuota: autoWaitForQuota ?? false,
+    autoRotateAccounts: autoRotateAccounts ?? false,
     enableSearch,
     enableImageTool,
     enableImageGeneration: enableImageGeneration ?? false,

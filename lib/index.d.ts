@@ -1,5 +1,5 @@
 import z from "@deepseek-ai/schemastery";
-import { AuthInteraction, Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
+import { AuthInteraction, Credential, CredentialInfo, CredentialStore, OAuthCredential } from "@earendil-works/pi-ai";
 import { LlmFailure, ResolvedRetryPolicy } from "@deepseek-ai/dsh-llm";
 import { SessionEvent } from "@deepseek-ai/dsh-session";
 import "@deepseek-ai/dsh-tools";
@@ -11,14 +11,41 @@ import { Agent } from "@deepseek-ai/dsh-agent";
 declare const OPENAI_CODEX_PROVIDER = "openai-codex";
 /** Basename of the OAuth document inside the Harness home. */
 declare const OPENAI_CODEX_AUTH_FILENAME = ".openai-codex-auth.json";
+/** Directory containing one owner-only credential document per ChatGPT account. */
+declare const OPENAI_CODEX_ACCOUNT_DIRECTORY = ".openai-codex-accounts";
+/** Manifest containing only account routing metadata; it never contains tokens. */
+declare const OPENAI_CODEX_ACCOUNT_POOL_FILENAME = "accounts.json";
+/** Store shape accepted by every Codex runtime component. */
+interface OpenAICodexCredentialSource extends CredentialStore {
+  /** A stable path used for colocating trusted-origin and account metadata. */
+  readonly filename?: string;
+}
+/** Public, secret-free account state suitable for the local Web UI. */
+type OpenAICodexAccountState = 'ready' | 'weekly-exhausted' | 'five-hour-wait' | 'reauth-required' | 'disabled';
+/** Public account metadata. Access and refresh tokens are intentionally absent. */
+interface OpenAICodexAccountSummary {
+  /** Opaque stable id used by the account-management routes. */
+  readonly id: string;
+  /** Optional user label; never inferred from a token. */
+  readonly label: string;
+  /** Last few account-id characters for recognition without exposing the id. */
+  readonly accountHint: string;
+  readonly active: boolean;
+  readonly state: OpenAICodexAccountState;
+  readonly lastUsedAt?: number;
+  readonly fiveHourResetAt?: number;
+  readonly weeklyResetAt?: number;
+}
 /**
  * Resolve the default OAuth document path.
  * @param dshHome - optional Harness-home override.
  * @returns the absolute owner-only document path.
  */
 declare function openAICodexAuthPath(dshHome?: string): string;
+/** Resolve the durable multi-account manifest path. */
+declare function openAICodexAccountPoolPath(dshHome?: string): string;
 /** File-backed pi-ai store scoped to the single OpenAI Codex provider. */
-declare class OpenAICodexCredentialStore implements CredentialStore {
+declare class OpenAICodexCredentialStore implements OpenAICodexCredentialSource {
   /** Absolute credential document path. */
   readonly filename: string;
   /**
@@ -27,6 +54,52 @@ declare class OpenAICodexCredentialStore implements CredentialStore {
   constructor(filename?: string);
   /** Read and validate the current document without acquiring the writer lock. */
   private readCurrent;
+  /** @inheritdoc */
+  read(providerId: string): Promise<Credential | undefined>;
+  /** @inheritdoc */
+  list(): Promise<readonly CredentialInfo[]>;
+  /** @inheritdoc */
+  modify(providerId: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>): Promise<Credential | undefined>;
+  /** @inheritdoc */
+  delete(providerId: string): Promise<void>;
+}
+/**
+ * Durable multi-account view for pi-ai's single-provider CredentialStore API.
+ *
+ * pi-ai deliberately accepts one credential per provider.  This class keeps
+ * the provider id stable while atomically moving an active-account pointer
+ * between separate credential files.  A request already in flight owns the
+ * token it resolved; a quota retry resolves the same Harness step against the
+ * newly selected account.  No session, transcript, plan, worktree, or browser
+ * context is recreated during rotation.
+ */
+declare class OpenAICodexCredentialPool implements OpenAICodexCredentialSource {
+  readonly filename: string;
+  private readonly legacyFilename;
+  private readonly accountsDirectory;
+  private initialized;
+  constructor(legacyFilename?: string, manifestFilename?: string);
+  private readPool;
+  private writePool;
+  private ensureInitialized;
+  private activeRecord;
+  /** Return an isolated file-backed view for one account after validating its id. */
+  storeForAccount(id: string): Promise<OpenAICodexCredentialStore>;
+  /** Return the currently selected opaque account id. */
+  activeAccountId(): Promise<string | undefined>;
+  /** List all accounts without returning access or refresh tokens. */
+  listAccounts(): Promise<readonly OpenAICodexAccountSummary[]>;
+  /** Add or replace a provider-native OAuth credential and select it. */
+  addAccount(credential: OAuthCredential, label?: string): Promise<string>;
+  /** Select an existing account; this does not touch any Harness session state. */
+  switchActive(id: string): Promise<void>;
+  /** Mark quota/auth state without storing provider response bodies or tokens. */
+  markAccountState(id: string, state: OpenAICodexAccountState, reset?: {
+    fiveHourResetAt?: number;
+    weeklyResetAt?: number;
+  }): Promise<void>;
+  /** Remove one account. The next account becomes active when necessary. */
+  removeAccount(id: string): Promise<void>;
   /** @inheritdoc */
   read(providerId: string): Promise<Credential | undefined>;
   /** @inheritdoc */
@@ -167,7 +240,7 @@ declare class OpenAICodexTransport extends Service implements OpenAICodexTranspo
   private readonly resolveProxyUrl;
   readonly apiVersion: 1;
   private readonly models;
-  constructor(ctx: Context, credentials: OpenAICodexCredentialStore, proxyManager?: OpenAICodexProxyManager | undefined, resolveProxyUrl?: () => string | undefined);
+  constructor(ctx: Context, credentials: OpenAICodexCredentialSource, proxyManager?: OpenAICodexProxyManager | undefined, resolveProxyUrl?: () => string | undefined);
   generateImages(input: ImageGenerationRequest, context: ImageRequestContext): Promise<ImageGenerationResponse>;
   private generateImagesWithoutProxy;
 }
@@ -349,7 +422,7 @@ declare function parseOpenAICodexUsage(value: unknown): OpenAICodexUsage;
  * @param store - plugin-owned OAuth credential store.
  * @returns current rate-limit buckets safe to expose to the local browser page.
  */
-declare function readOpenAICodexRateLimits(store: OpenAICodexCredentialStore): Promise<OpenAICodexUsage>;
+declare function readOpenAICodexRateLimits(store: OpenAICodexCredentialSource): Promise<OpenAICodexUsage>;
 //#endregion
 //#region src/settings-contract.d.ts
 /** Node-free settings contract shared by the Host plugin and browser card. */
@@ -402,6 +475,8 @@ interface OpenAICodexSettingsConfig {
   transport: OpenAICodexStreamTransport;
   /** Wait for a server-reported five-hour reset and retry the same request. */
   autoWaitForQuota: boolean;
+  /** Rotate to another explicitly added account after weekly exhaustion. */
+  autoRotateAccounts: boolean;
   enableSearch: boolean;
   enableImageTool: boolean;
   enableImageGeneration: boolean;
@@ -473,7 +548,7 @@ interface OpenAICodexSearchRequestRecord {
 /** Fully resolved provider options. */
 interface OpenAICodexSearchProviderOptions {
   /** Shared persistent OAuth store. */
-  readonly credentials: OpenAICodexCredentialStore;
+  readonly credentials: OpenAICodexCredentialSource;
   /** Model sent to the standalone search endpoint. */
   readonly model: string;
   /** Cached, indexed, or live external-web policy. */
@@ -561,6 +636,16 @@ interface OpenAICodexQuotaRecoveryOptions {
   readonly now?: () => number;
   readonly sleep?: (delayMs: number, signal: AbortSignal) => Promise<boolean>;
   readonly maxStaleResets?: number;
+  /** Select another authenticated account after weekly exhaustion. */
+  readonly rotateAccount?: (model: string | undefined, signal: AbortSignal) => Promise<{
+    rotated: boolean;
+    resetAt?: number;
+  }>;
+  /** Persist the exhausted account's state before another request can rotate it. */
+  readonly activeAccountId?: () => Promise<string | undefined>;
+  readonly markWeeklyExhausted?: (resetAt: number | undefined, accountId?: string) => Promise<void>;
+  /** When every account is exhausted, wait for the earliest known weekly reset. */
+  readonly waitForWeeklyReset?: boolean | (() => boolean);
 }
 /** Select the usage bucket associated with a Codex model. */
 declare function openAICodexQuotaIdForModel(model: string | undefined): string;
@@ -575,7 +660,18 @@ declare function cancellableOpenAICodexQuotaDelay(delayMs: number, signal: Abort
 /** Register the same-account five-hour quota waiter on the Harness waterfall. */
 declare function registerOpenAICodexQuotaRecovery(ctx: Context, options: OpenAICodexQuotaRecoveryOptions): void;
 /** Build a quota probe that follows the active Codex-only proxy scope. */
-declare function createOpenAICodexQuotaUsageReader(store: OpenAICodexCredentialStore, proxyManager: OpenAICodexProxyManager, resolveProxyUrl: () => string | undefined): () => Promise<OpenAICodexUsage>;
+declare function createOpenAICodexQuotaUsageReader(store: OpenAICodexCredentialSource, proxyManager: OpenAICodexProxyManager, resolveProxyUrl: () => string | undefined): () => Promise<OpenAICodexUsage>;
+/**
+ * Probe the account pool and atomically select the first usable account.
+ * Candidate probes use their own file-backed store, so refreshing one account
+ * cannot overwrite another account's token or the active pointer.  A request
+ * that is already streaming keeps its resolved bearer; only the retry sees the
+ * newly selected account, which preserves the original Harness session.
+ */
+declare function createOpenAICodexQuotaAccountRotator(pool: OpenAICodexCredentialPool, proxyManager: OpenAICodexProxyManager, resolveProxyUrl: () => string | undefined): (model: string | undefined, signal: AbortSignal) => Promise<{
+  rotated: boolean;
+  resetAt?: number;
+}>;
 //#endregion
 //#region src/persist.d.ts
 /** Version of the plugin-owned event payload. Increment on incompatible changes. */
@@ -668,24 +764,28 @@ interface OpenAICodexAuthStatus {
   authenticated: boolean;
   /** Access-token expiry time; refresh is automatic on the next request. */
   expiresAt?: Date;
+  /** Redacted account metadata when the pool has been enabled. */
+  accounts?: readonly OpenAICodexAccountSummary[];
+  /** Opaque id of the account used by new requests. */
+  activeAccountId?: string;
 }
 /**
  * Complete provider-native OAuth and persist the resulting credential.
  * @param interaction - terminal or UI callbacks for the provider flow.
  * @param store - credential store, defaulting under `$DSH_HOME`.
  */
-declare function loginOpenAICodex(interaction: AuthInteraction, store?: OpenAICodexCredentialStore): Promise<void>;
+declare function loginOpenAICodex(interaction: AuthInteraction, store?: OpenAICodexCredentialSource, label?: string): Promise<void>;
 /**
  * Remove the stored OpenAI Codex credential.
  * @param store - credential store, defaulting under `$DSH_HOME`.
  */
-declare function logoutOpenAICodex(store?: OpenAICodexCredentialStore): Promise<void>;
+declare function logoutOpenAICodex(store?: OpenAICodexCredentialSource): Promise<void>;
 /**
  * Read non-secret OpenAI Codex login state without refreshing the token.
  * @param store - credential store, defaulting under `$DSH_HOME`.
  * @returns stored login state and expiry.
  */
-declare function openAICodexAuthStatus(store?: OpenAICodexCredentialStore): Promise<OpenAICodexAuthStatus>;
+declare function openAICodexAuthStatus(store?: OpenAICodexCredentialSource): Promise<OpenAICodexAuthStatus>;
 //#endregion
 //#region src/fast-mode.d.ts
 /** Process-local, per-session OpenAI Codex Fast Mode state. */
@@ -735,7 +835,7 @@ declare const OPENAI_CODEX_FAST_MODE_PATH = "/plugins/dsh-openai-codex/fast-mode
 declare const OPENAI_CODEX_UPDATE_PATH = "/openai-codex/update";
 //#endregion
 //#region src/update.d.ts
-type OpenAICodexUpdateHighlightKind = 'trusted-origins' | 'runtime-compatibility' | 'quota-fast-mode' | 'dsh-rc7' | 'search-stability' | 'image-generation' | 'oauth-history' | 'model-visibility' | 'proxy-connection';
+type OpenAICodexUpdateHighlightKind = 'trusted-origins' | 'runtime-compatibility' | 'quota-fast-mode' | 'dsh-rc7' | 'search-stability' | 'image-generation' | 'oauth-history' | 'model-visibility' | 'proxy-connection' | 'account-rotation';
 interface OpenAICodexUpdateHighlight {
   version: string;
   kind: OpenAICodexUpdateHighlightKind;
@@ -852,6 +952,8 @@ interface Config {
   transport?: OpenAICodexStreamTransport;
   /** Wait for the server-reported five-hour quota reset and retry the same step. */
   autoWaitForQuota?: boolean;
+  /** Rotate between explicitly added ChatGPT accounts after weekly exhaustion. */
+  autoRotateAccounts?: boolean;
   /**
    * Per-model context-window overrides keyed by catalog model id. Each value
    * replaces the advertised `contextWindow` for that model inside the adapter
@@ -885,4 +987,4 @@ declare const Config: z<Config>;
  */
 declare function apply(ctx: Context, config: Config): void;
 //#endregion
-export { COMPATIBILITY_CONTRACT, COMPATIBILITY_PACKAGES, COMPATIBILITY_SCHEMA_VERSION, type CompatibilityDetectionOptions, type CompatibilityEntry, type CompatibilityEvaluationInput, type CompatibilityPackageName, type CompatibilityReport, type CompatibilityStatus, Config, DEFAULT_OPENAI_CODEX_PROXY_URL, DEFAULT_OPENAI_CODEX_SEARCH_CONTEXT_SIZE, DEFAULT_OPENAI_CODEX_SEARCH_MAX_OUTPUT_TOKENS, DEFAULT_OPENAI_CODEX_SEARCH_MODE, DEFAULT_OPENAI_CODEX_SEARCH_MODEL, DEFAULT_OPENAI_CODEX_SETTINGS, DEFAULT_OPENAI_CODEX_TRANSPORT, DSH_PLUGIN_API_PACKAGES, FastModeRegistry, FastModeRegistry as OpenAICodexFastModeRegistry, type GeneratedImagePayload, IMAGE_GENERATE_TOOL_NAME, type ImageGenerationRequest, type ImageGenerationResponse, type ImageRequestContext, OPENAI_CODEX_AUTH_FILENAME, OPENAI_CODEX_BASE_URL, OPENAI_CODEX_FAST_MODE_MAX_SESSIONS, OPENAI_CODEX_FAST_MODE_MAX_SESSION_ID_LENGTH, OPENAI_CODEX_FAST_MODE_PATH, OPENAI_CODEX_FIVE_HOUR_WINDOW_SECONDS, OPENAI_CODEX_HISTORY_BACKUP_SUFFIX, OPENAI_CODEX_IMAGE_GENERATION_URL, OPENAI_CODEX_IMAGE_MAX_COUNT, OPENAI_CODEX_IMAGE_MAX_ERROR_BYTES, OPENAI_CODEX_IMAGE_MAX_RESPONSE_BYTES, OPENAI_CODEX_IMAGE_PROMPT_MAX_LENGTH, OPENAI_CODEX_IMAGE_REQUEST_TIMEOUT_MS, OPENAI_CODEX_LOCAL_PROXY_CANDIDATES, OPENAI_CODEX_PROVIDER, OPENAI_CODEX_PROXY_CANDIDATE_LIMIT, OPENAI_CODEX_PROXY_DETECT_PATH, OPENAI_CODEX_PROXY_PROBE_TIMEOUT_MS, OPENAI_CODEX_PROXY_PROBE_URL, OPENAI_CODEX_PROXY_TEST_PATH, OPENAI_CODEX_QUOTA_MAX_STALE_RESETS, OPENAI_CODEX_QUOTA_RESET_SKEW_MS, OPENAI_CODEX_QUOTA_WAIT_CHUNK_MS, OPENAI_CODEX_SEARCH_MAX_RESPONSE_BYTES, OPENAI_CODEX_SEARCH_MODEL_REQUEST_EVENT, OPENAI_CODEX_SEARCH_PROVIDER, OPENAI_CODEX_SEARCH_REQUEST_TIMEOUT_MS, OPENAI_CODEX_SEARCH_URL, OPENAI_CODEX_SETTINGS_NAMESPACE, OPENAI_CODEX_SETTINGS_NS, OPENAI_CODEX_TRANSPORT_API_VERSION, OPENAI_CODEX_TRANSPORT_ERROR_CODES, OPENAI_CODEX_TRANSPORT_SERVICE, OPENAI_CODEX_UPDATE_PATH, OPENAI_CODEX_USAGE_URL, OPENAI_CODEX_WEEKLY_WINDOW_SECONDS, type OpenAICodexAuthStatus, OpenAICodexCredentialStore, type OpenAICodexCredits, type OpenAICodexDiagnosticOptions, type OpenAICodexDiagnosticReport, type OpenAICodexHistoryMigrationFile, type OpenAICodexHistoryMigrationOptions, type OpenAICodexHistoryMigrationResult, type OpenAICodexIndividualLimit, OpenAICodexProxyManager, type OpenAICodexProxyProbeClassification, type OpenAICodexProxyProbeResult, type OpenAICodexQuotaDecision, type OpenAICodexQuotaRecoveryLogger, type OpenAICodexQuotaRecoveryOptions, type OpenAICodexRateLimit, type OpenAICodexRateLimitWindow, type OpenAICodexRequestErrorPayload, type OpenAICodexSearchContextSize, type OpenAICodexSearchMode, OpenAICodexSearchProvider, type OpenAICodexSearchProviderOptions, type OpenAICodexSearchRequestRecord, type OpenAICodexSettingsConfig, type OpenAICodexStreamTransport, OpenAICodexTransport, OpenAICodexTransportError, type OpenAICodexTransportErrorCode, type OpenAICodexTransportV1, type OpenAICodexUpdateResult, type OpenAICodexUsage, PERSIST_CHANGE_VERSION, PERSIST_DEFAULT_MAX_GOAL_ROUNDS, PERSIST_PLAN_MAX_CHARS, PERSIST_QUESTIONS_MAX_CHARS, PERSIST_REASON_MAX_CHARS, PI_AI_PACKAGE, type ParsedPersistPlan, type PersistChange, type PersistPhase, type PersistState, SUPPORTED_DSH_PLUGIN_API_VERSION, SUPPORTED_NODE_RANGE, SUPPORTED_PI_AI_VERSION, VIEW_IMAGE_TOOL_NAME, apply, assertNoOpenAICodexProviderConflict, assessCompatibility, cancellableOpenAICodexQuotaDelay, checkForOpenAICodexUpdate, classifyOpenAICodexQuota, compareOpenAICodexVersions, createOpenAICodexQuotaUsageReader, decodeOpenAICodexSettings, detectCompatibility, detectOpenAICodexProxies, diagnoseOpenAICodex, evaluateCompatibility, foldPersistState, inject, isFastModeSessionId, isOpenAICodexTransportError, isValidOpenAICodexContextWindowOverrides, isValidOpenAICodexProxyUrl, isValidOpenAICodexTransport, listOpenAICodexProxyCandidates, loginOpenAICodex, logoutOpenAICodex, mapOpenAICodexSearchResponse, migrateOpenAICodexSearchHistory, name, openAICodexAuthPath, openAICodexAuthStatus, openAICodexConflictMessage, openAICodexQuotaIdForModel, parseOpenAICodexUpdateResult, parseOpenAICodexUsage, parseOpenAICodexVersion, parsePersistCommand, parsePersistExecutionSignals, parsePersistPlan, readOpenAICodexRateLimits, registerOpenAICodexQuotaRecovery, registerPersistCommand, resolveOpenAICodexProxyUrl, resolveOpenAICodexSettings };
+export { COMPATIBILITY_CONTRACT, COMPATIBILITY_PACKAGES, COMPATIBILITY_SCHEMA_VERSION, type CompatibilityDetectionOptions, type CompatibilityEntry, type CompatibilityEvaluationInput, type CompatibilityPackageName, type CompatibilityReport, type CompatibilityStatus, Config, DEFAULT_OPENAI_CODEX_PROXY_URL, DEFAULT_OPENAI_CODEX_SEARCH_CONTEXT_SIZE, DEFAULT_OPENAI_CODEX_SEARCH_MAX_OUTPUT_TOKENS, DEFAULT_OPENAI_CODEX_SEARCH_MODE, DEFAULT_OPENAI_CODEX_SEARCH_MODEL, DEFAULT_OPENAI_CODEX_SETTINGS, DEFAULT_OPENAI_CODEX_TRANSPORT, DSH_PLUGIN_API_PACKAGES, FastModeRegistry, FastModeRegistry as OpenAICodexFastModeRegistry, type GeneratedImagePayload, IMAGE_GENERATE_TOOL_NAME, type ImageGenerationRequest, type ImageGenerationResponse, type ImageRequestContext, OPENAI_CODEX_ACCOUNT_DIRECTORY, OPENAI_CODEX_ACCOUNT_POOL_FILENAME, OPENAI_CODEX_AUTH_FILENAME, OPENAI_CODEX_BASE_URL, OPENAI_CODEX_FAST_MODE_MAX_SESSIONS, OPENAI_CODEX_FAST_MODE_MAX_SESSION_ID_LENGTH, OPENAI_CODEX_FAST_MODE_PATH, OPENAI_CODEX_FIVE_HOUR_WINDOW_SECONDS, OPENAI_CODEX_HISTORY_BACKUP_SUFFIX, OPENAI_CODEX_IMAGE_GENERATION_URL, OPENAI_CODEX_IMAGE_MAX_COUNT, OPENAI_CODEX_IMAGE_MAX_ERROR_BYTES, OPENAI_CODEX_IMAGE_MAX_RESPONSE_BYTES, OPENAI_CODEX_IMAGE_PROMPT_MAX_LENGTH, OPENAI_CODEX_IMAGE_REQUEST_TIMEOUT_MS, OPENAI_CODEX_LOCAL_PROXY_CANDIDATES, OPENAI_CODEX_PROVIDER, OPENAI_CODEX_PROXY_CANDIDATE_LIMIT, OPENAI_CODEX_PROXY_DETECT_PATH, OPENAI_CODEX_PROXY_PROBE_TIMEOUT_MS, OPENAI_CODEX_PROXY_PROBE_URL, OPENAI_CODEX_PROXY_TEST_PATH, OPENAI_CODEX_QUOTA_MAX_STALE_RESETS, OPENAI_CODEX_QUOTA_RESET_SKEW_MS, OPENAI_CODEX_QUOTA_WAIT_CHUNK_MS, OPENAI_CODEX_SEARCH_MAX_RESPONSE_BYTES, OPENAI_CODEX_SEARCH_MODEL_REQUEST_EVENT, OPENAI_CODEX_SEARCH_PROVIDER, OPENAI_CODEX_SEARCH_REQUEST_TIMEOUT_MS, OPENAI_CODEX_SEARCH_URL, OPENAI_CODEX_SETTINGS_NAMESPACE, OPENAI_CODEX_SETTINGS_NS, OPENAI_CODEX_TRANSPORT_API_VERSION, OPENAI_CODEX_TRANSPORT_ERROR_CODES, OPENAI_CODEX_TRANSPORT_SERVICE, OPENAI_CODEX_UPDATE_PATH, OPENAI_CODEX_USAGE_URL, OPENAI_CODEX_WEEKLY_WINDOW_SECONDS, type OpenAICodexAccountState, type OpenAICodexAccountSummary, type OpenAICodexAuthStatus, OpenAICodexCredentialPool, type OpenAICodexCredentialSource, OpenAICodexCredentialStore, type OpenAICodexCredits, type OpenAICodexDiagnosticOptions, type OpenAICodexDiagnosticReport, type OpenAICodexHistoryMigrationFile, type OpenAICodexHistoryMigrationOptions, type OpenAICodexHistoryMigrationResult, type OpenAICodexIndividualLimit, OpenAICodexProxyManager, type OpenAICodexProxyProbeClassification, type OpenAICodexProxyProbeResult, type OpenAICodexQuotaDecision, type OpenAICodexQuotaRecoveryLogger, type OpenAICodexQuotaRecoveryOptions, type OpenAICodexRateLimit, type OpenAICodexRateLimitWindow, type OpenAICodexRequestErrorPayload, type OpenAICodexSearchContextSize, type OpenAICodexSearchMode, OpenAICodexSearchProvider, type OpenAICodexSearchProviderOptions, type OpenAICodexSearchRequestRecord, type OpenAICodexSettingsConfig, type OpenAICodexStreamTransport, OpenAICodexTransport, OpenAICodexTransportError, type OpenAICodexTransportErrorCode, type OpenAICodexTransportV1, type OpenAICodexUpdateResult, type OpenAICodexUsage, PERSIST_CHANGE_VERSION, PERSIST_DEFAULT_MAX_GOAL_ROUNDS, PERSIST_PLAN_MAX_CHARS, PERSIST_QUESTIONS_MAX_CHARS, PERSIST_REASON_MAX_CHARS, PI_AI_PACKAGE, type ParsedPersistPlan, type PersistChange, type PersistPhase, type PersistState, SUPPORTED_DSH_PLUGIN_API_VERSION, SUPPORTED_NODE_RANGE, SUPPORTED_PI_AI_VERSION, VIEW_IMAGE_TOOL_NAME, apply, assertNoOpenAICodexProviderConflict, assessCompatibility, cancellableOpenAICodexQuotaDelay, checkForOpenAICodexUpdate, classifyOpenAICodexQuota, compareOpenAICodexVersions, createOpenAICodexQuotaAccountRotator, createOpenAICodexQuotaUsageReader, decodeOpenAICodexSettings, detectCompatibility, detectOpenAICodexProxies, diagnoseOpenAICodex, evaluateCompatibility, foldPersistState, inject, isFastModeSessionId, isOpenAICodexTransportError, isValidOpenAICodexContextWindowOverrides, isValidOpenAICodexProxyUrl, isValidOpenAICodexTransport, listOpenAICodexProxyCandidates, loginOpenAICodex, logoutOpenAICodex, mapOpenAICodexSearchResponse, migrateOpenAICodexSearchHistory, name, openAICodexAccountPoolPath, openAICodexAuthPath, openAICodexAuthStatus, openAICodexConflictMessage, openAICodexQuotaIdForModel, parseOpenAICodexUpdateResult, parseOpenAICodexUsage, parseOpenAICodexVersion, parsePersistCommand, parsePersistExecutionSignals, parsePersistPlan, readOpenAICodexRateLimits, registerOpenAICodexQuotaRecovery, registerPersistCommand, resolveOpenAICodexProxyUrl, resolveOpenAICodexSettings };

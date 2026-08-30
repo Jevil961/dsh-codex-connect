@@ -28,13 +28,14 @@ dsh plugin --profile web add dsh-codex-connect@alpha
 
 Expected result: the package is added to that profile. This does not change the profile's default model or global search route.
 
-To reproduce this release exactly, use `dsh plugin --profile web add dsh-codex-connect@0.1.0-alpha.4.21`. If npm is unavailable after the matching GitHub prerelease exists, use `dsh plugin --profile web add 'github:franksong2702/dsh-codex-connect#v0.1.0-alpha.4.21'`. A local checkout can be installed as `link:/absolute/path/to/dsh-codex-connect`.
+To reproduce this release exactly, use `dsh plugin --profile web add dsh-codex-connect@0.1.0-alpha.4.22`. If npm is unavailable after the matching GitHub prerelease exists, use `dsh plugin --profile web add 'github:franksong2702/dsh-codex-connect#v0.1.0-alpha.4.22'`. A local checkout can be installed as `link:/absolute/path/to/dsh-codex-connect`.
 
-### What's new in Alpha 4.21
+### What's new in Alpha 4.22
 
 - Preserve and download the exact generated image separately from the conversation preview, including from restored sessions and forks that inherited the image result.
 - Inspect runtime and Responses/SSE evidence with the opt-in `capabilities` command. Network probing requires explicit `--probe`; it does not enable unsupported features or alter routing.
 - Use clearer exact-version installation guidance and expanded release/canary CI checks. The supported DSH version remains `0.1.1-rc.2`.
+- Keep multiple ChatGPT OAuth accounts in a durable pool and optionally rotate on weekly exhaustion without replacing the Harness session or its memory.
 
 ### `/persist`: plan first, then keep working
 
@@ -188,14 +189,21 @@ Choose **Use this proxy** only after reviewing a candidate, then click **Save ch
 
 ### Automatic five-hour quota recovery
 
-`autoWaitForQuota` defaults to `false`. When enabled, a Codex request that reports an exhausted five-hour window reads the current server usage, waits until the returned reset time, and retries the same failed model step. The wait is cancellable when the user stops the turn or the Host unloads. If the weekly window is exhausted, or the usage endpoint does not provide a usable reset time, no automatic wait or account rotation is scheduled; the normal finite retry policy may handle a transient failure. This setting never bypasses approvals or changes the selected provider.
+`autoWaitForQuota` defaults to `false`. When enabled, a Codex request that reports an exhausted five-hour window reads the current server usage, waits until the returned reset time, and retries the same failed model step. The wait is cancellable when the user stops the turn or the Host unloads. Weekly account handling is controlled separately by `autoRotateAccounts`; missing reset data or a failed usage probe never creates an unbounded retry loop. These settings never bypass approvals or change the selected provider.
+
+### Account pool and seamless weekly rotation
+
+Codex Connect keeps each explicitly added ChatGPT account in its own owner-only file under `.openai-codex-accounts/`. Existing `.openai-codex-auth.json` files are imported on first use and kept as a rollback copy. The Web card lists redacted account hints and lets you add, select, or remove accounts; the manifest never contains access or refresh tokens.
+
+`autoRotateAccounts` defaults to `false`. When enabled (or during a confirmed `/persist` run), a weekly-quota failure probes the other configured accounts, marks exhausted or re-authenticated accounts, selects a usable account, and retries the same failed model step. The Harness session id, transcript, plan state, tool approvals, attachments, browser context, and worktree are not recreated or changed. If every account is exhausted and a future reset is known, a `/persist` run waits for the earliest reset; otherwise the request pauses with an actionable message. Account rotation never purchases credits, bypasses approvals, or treats a 401 as a quota event.
 
 ### Enable only the capability you intend to use
 
 - `enableSearch: true` registers Codex as an available search provider. It does not select the profile's global search route.
 - `enableImageTool: true` enables `view_image` for approved local reads and public-network image fetches on vision-capable models.
 - `enableImageGeneration: true` enables the prompt-only image generation tool. Use the image generation capability included with your current GPT subscription. Codex Connect preserves the exact generated file in plugin-owned storage and saves a DSH attachment as the conversation preview.
-- `autoWaitForQuota: true` opts into the five-hour quota wait described above. Weekly exhaustion remains a visible stop that requires a manual account or provider choice.
+- `autoWaitForQuota: true` opts into the five-hour quota wait described above.
+- `autoRotateAccounts: true` opts into weekly account rotation. Add at least two accounts in the Codex Connect card first; a revoked account is never silently skipped forever and must be signed in again.
 
 The screenshot below is an example after someone has explicitly enabled capabilities. It does not show the fresh-install default. This English guide uses the English-localized capture; the Chinese guide shows the matching Chinese-localized state.
 
@@ -263,6 +271,7 @@ Selecting Codex as the profile's global search route is another explicit change:
 | `proxyUrl` | `http://127.0.0.1:7890` (inactive placeholder) | Credential-free HTTP(S) proxy origin |
 | `transport` | `sse` | `sse`, `websocket`, `websocket-cached`, `auto`; SSE is the safe default |
 | `autoWaitForQuota` | `false` | boolean; wait for a future five-hour reset and retry the same step |
+| `autoRotateAccounts` | `false` | boolean; probe and switch explicitly added accounts after weekly exhaustion |
 | `contextWindowOverrides` | none | Per-model context-window override map; see below |
 | `enableSearch` | `false` | boolean |
 | `enableImageTool` | `false` | boolean |
@@ -334,7 +343,7 @@ This report covers only the standalone finite-SSE route, not active profile rout
 
 ## Compatibility and security boundary
 
-- The only verified compatibility combination is DSH plugin API packages `0.1.1-rc.2`, `@earendil-works/pi-ai` `0.82.1`, and Node.js `^22.19.0 || >=24.0.0`; see [compatibility.json](compatibility.json). Alpha 4.21 uses the rc.2 keyed Plugin configuration slot; users of older DSH API packages should upgrade to the rc.2 API packages.
+- The only verified compatibility combination is DSH plugin API packages `0.1.1-rc.2`, `@earendil-works/pi-ai` `0.82.1`, and Node.js `^22.19.0 || >=24.0.0`; see [compatibility.json](compatibility.json). Alpha 4.22 uses the rc.2 keyed Plugin configuration slot; users of older DSH API packages should upgrade to the rc.2 API packages.
 - Upgrade the DSH plugin API packages and `@earendil-works/pi-ai` as one group, then run `dsh-codex-connect doctor --json` and the compatibility check again. This contract does not make claims about future versions.
 - When the daily upstream check finds a new `latest` or `next` DSH candidate, it installs Codex Connect into an isolated profile, boots the installed model runtime without OAuth credentials, verifies model and reasoning-effort discovery, and confirms provider disposal. Live sign-in, quota, and model requests still require manual validation in the test profile.
 - ChatGPT plan eligibility, model access, quotas, and backend behavior are controlled by OpenAI and may change.

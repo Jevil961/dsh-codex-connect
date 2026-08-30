@@ -6,7 +6,7 @@ import { evaluateCompatibility, DSH_PLUGIN_API_PACKAGES, readInstalledPackageVer
 import { diagnoseOpenAICodex } from './doctor.ts'
 import { probeCodexResponses } from './capability-probe.ts'
 import type { ResponsesProbeEvidence, ResponsesProbeRequest } from './capability-probe.ts'
-import { OPENAI_CODEX_PROVIDER, OpenAICodexCredentialStore } from './store.ts'
+import { OPENAI_CODEX_PROVIDER, type OpenAICodexCredentialSource, OpenAICodexCredentialStore } from './store.ts'
 import { CODEX_CONNECT_VERSION } from './version.ts'
 
 /** A result applies only to its named check and evidence, not all provider features. */
@@ -48,7 +48,7 @@ export interface CapabilityDiagnosticDependencies {
   diagnose: typeof diagnoseOpenAICodex
   readVersion: typeof readInstalledPackageVersion
   catalog: typeof openAICodexModelCatalog
-  credentials: Pick<OpenAICodexCredentialStore, 'read'>
+  credentials: Pick<OpenAICodexCredentialSource, 'read'>
   probe: (request: ResponsesProbeRequest) => Promise<ResponsesProbeEvidence>
   now: () => number
 }

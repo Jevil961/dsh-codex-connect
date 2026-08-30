@@ -4,10 +4,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type { OpenAICodexUsage } from '../usage.ts'
+import type { OpenAICodexAccountSummary } from '../store.ts'
 import type { OpenAICodexSettingsConfig } from '../settings-contract.ts'
 import {
   OPENAI_CODEX_AUTH_LOGIN_PATH,
   OPENAI_CODEX_AUTH_LOGOUT_PATH,
+  OPENAI_CODEX_AUTH_ACCOUNT_REMOVE_PATH,
+  OPENAI_CODEX_AUTH_ACCOUNT_SELECT_PATH,
   OPENAI_CODEX_AUTH_STATUS_PATH,
 } from '../auth-paths.ts'
 import type { OpenAICodexSettingsKey } from './locales.ts'
@@ -22,8 +25,8 @@ type AccountStatus =
   | { status: 'loading' }
   | { status: 'signed-out' }
   | { status: 'signing-in' }
-  | { status: 'reauth-required'; message: string }
-  | { status: 'signed-in'; usage: OpenAICodexUsage; quotaError?: string }
+  | { status: 'reauth-required'; message: string; accounts?: readonly OpenAICodexAccountSummary[]; activeAccountId?: string }
+  | { status: 'signed-in'; usage: OpenAICodexUsage; quotaError?: string; accounts?: readonly OpenAICodexAccountSummary[]; activeAccountId?: string }
   | { status: 'remote-web-origin-not-trusted' }
   | { status: 'error'; message: string }
 
@@ -64,6 +67,9 @@ const quotaTitleStyle: CSSProperties = { margin: 0, fontSize: 14, lineHeight: '2
 const quotaLabelStyle: CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13, lineHeight: '20px', color: 'var(--dsw-alias-label-secondary)' }
 const progressTrackStyle: CSSProperties = { height: 8, overflow: 'hidden', borderRadius: 999, background: 'var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.08))' }
 const commandStyle: CSSProperties = { margin: 0, padding: '10px 12px', overflowX: 'auto', borderRadius: 8, background: 'var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.06))', color: 'var(--dsw-alias-label-primary)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, lineHeight: '20px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }
+const accountListStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8 }
+const accountItemStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 10px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8 }
+const accountMetaStyle: CSSProperties = { display: 'flex', minWidth: 0, flexDirection: 'column', gap: 2, fontSize: 13, color: 'var(--dsw-alias-label-primary)' }
 
 function progressFillStyle(percent: number): CSSProperties {
   return {
@@ -194,11 +200,15 @@ class AccountRequestError extends Error {
   }
 }
 
-async function jsonRequest<T>(path: string, method = 'GET', signal?: AbortSignal): Promise<T> {
+async function jsonRequest<T>(path: string, method = 'GET', signal?: AbortSignal, body?: unknown): Promise<T> {
   const response = await fetch(path, {
     method,
-    headers: { accept: 'application/json' },
+    headers: {
+      accept: 'application/json',
+      ...body === undefined ? {} : { 'content-type': 'application/json' },
+    },
     credentials: 'same-origin',
+    ...body === undefined ? {} : { body: JSON.stringify(body) },
     ...signal === undefined ? {} : { signal },
   })
   const value: unknown = await response.json().catch(() => undefined)
@@ -318,6 +328,30 @@ export function OpenAICodexSettings({ t, configScope, updater, embedded = false 
     }
   }
 
+  const selectAccount = async (accountId: string): Promise<void> => {
+    setBusy(true)
+    try {
+      await jsonRequest<{ ok: true }>(OPENAI_CODEX_AUTH_ACCOUNT_SELECT_PATH, 'POST', undefined, { accountId })
+      await refresh()
+    } catch (error: unknown) {
+      if (mounted.current) setStatus({ status: 'error', message: error instanceof Error ? error.message : t('requestFailed') })
+    } finally {
+      if (mounted.current) setBusy(false)
+    }
+  }
+
+  const removeAccount = async (accountId: string): Promise<void> => {
+    setBusy(true)
+    try {
+      await jsonRequest<{ ok: true }>(OPENAI_CODEX_AUTH_ACCOUNT_REMOVE_PATH, 'POST', undefined, { accountId })
+      await refresh()
+    } catch (error: unknown) {
+      if (mounted.current) setStatus({ status: 'error', message: error instanceof Error ? error.message : t('requestFailed') })
+    } finally {
+      if (mounted.current) setBusy(false)
+    }
+  }
+
   const label = status.status === 'signed-in'
     ? t('signedIn')
     : status.status === 'loading'
@@ -395,6 +429,23 @@ export function OpenAICodexSettings({ t, configScope, updater, embedded = false 
               t={t}
             />
           : null}
+        {(status.status === 'signed-in' || status.status === 'reauth-required') && status.accounts !== undefined && status.accounts.length > 0 ? (
+          <div style={accountListStyle} aria-label={t('accountListHeading')}>
+            <h3 style={quotaTitleStyle}>{t('accountListHeading')}</h3>
+            {status.accounts.map(account => (
+              <div key={account.id} style={accountItemStyle}>
+                <div style={accountMetaStyle}>
+                  <span>{account.label}{account.active ? ` · ${t('accountActive')}` : ''}</span>
+                  <span style={bodyStyle}>{account.accountHint}</span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {account.active ? null : <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void selectAccount(account.id) }}>{t('switchAccount')}</button>}
+                  <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void removeAccount(account.id) }}>{t('removeAccount')}</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <OpenAICodexConfiguration
           t={t}
           {...configScope === undefined ? {} : { scope: configScope }}

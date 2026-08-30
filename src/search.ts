@@ -13,7 +13,7 @@ import type {
   WebSearchResult,
   WebSearchSource,
 } from '@deepseek-ai/dsh-web'
-import type { OpenAICodexCredentialStore } from './store.ts'
+import type { OpenAICodexCredentialSource } from './store.ts'
 import { OPENAI_CODEX_PROVIDER } from './store.ts'
 import type { OpenAICodexProxyManager } from './provider-proxy.ts'
 import {
@@ -84,7 +84,7 @@ export interface OpenAICodexSearchRequestRecord {
 /** Fully resolved provider options. */
 export interface OpenAICodexSearchProviderOptions {
   /** Shared persistent OAuth store. */
-  readonly credentials: OpenAICodexCredentialStore
+  readonly credentials: OpenAICodexCredentialSource
   /** Model sent to the standalone search endpoint. */
   readonly model: string
   /** Cached, indexed, or live external-web policy. */
@@ -310,7 +310,7 @@ function searchRequestSignal(parent: AbortSignal | undefined): {
 /** Resolve the account id, tolerating opaque access tokens after refresh. */
 async function accountIdFromTokenOrStore(
   access: string,
-  credentials: OpenAICodexCredentialStore,
+  credentials: OpenAICodexCredentialSource,
   signal: AbortSignal | undefined,
 ): Promise<string> {
   try {

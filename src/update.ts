@@ -22,6 +22,7 @@ export type OpenAICodexUpdateHighlightKind =
   | 'oauth-history'
   | 'model-visibility'
   | 'proxy-connection'
+  | 'account-rotation'
 
 export interface OpenAICodexUpdateHighlight {
   version: string
@@ -72,6 +73,7 @@ const HIGHLIGHT_KINDS: readonly OpenAICodexUpdateHighlightKind[] = [
   'oauth-history',
   'model-visibility',
   'proxy-connection',
+  'account-rotation',
 ]
 
 function isHighlightKind(value: unknown): value is OpenAICodexUpdateHighlightKind {

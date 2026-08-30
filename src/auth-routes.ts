@@ -6,7 +6,7 @@ import type { AuthEvent, AuthPrompt } from '@earendil-works/pi-ai'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { loginOpenAICodex, logoutOpenAICodex, openAICodexAuthStatus } from './auth.ts'
-import type { OpenAICodexCredentialStore } from './store.ts'
+import type { OpenAICodexAccountSummary, OpenAICodexCredentialSource } from './store.ts'
 import {
   isOpenAICodexReauthRequiredError,
   OPENAI_CODEX_REAUTH_REQUIRED_MESSAGE,
@@ -16,6 +16,9 @@ import type { OpenAICodexUsage } from './usage.ts'
 import {
   OPENAI_CODEX_AUTH_LOGIN_PATH,
   OPENAI_CODEX_AUTH_LOGOUT_PATH,
+  OPENAI_CODEX_AUTH_ACCOUNTS_PATH,
+  OPENAI_CODEX_AUTH_ACCOUNT_SELECT_PATH,
+  OPENAI_CODEX_AUTH_ACCOUNT_REMOVE_PATH,
   OPENAI_CODEX_AUTH_STATUS_PATH,
 } from './auth-paths.ts'
 import {
@@ -30,6 +33,9 @@ import type { OpenAICodexProxyManager } from './provider-proxy.ts'
 export {
   OPENAI_CODEX_AUTH_LOGIN_PATH,
   OPENAI_CODEX_AUTH_LOGOUT_PATH,
+  OPENAI_CODEX_AUTH_ACCOUNTS_PATH,
+  OPENAI_CODEX_AUTH_ACCOUNT_SELECT_PATH,
+  OPENAI_CODEX_AUTH_ACCOUNT_REMOVE_PATH,
   OPENAI_CODEX_AUTH_STATUS_PATH,
 } from './auth-paths.ts'
 export { OPENAI_CODEX_FAST_MODE_PATH } from './fast-mode-paths.ts'
@@ -43,12 +49,27 @@ export const REMOTE_WEB_ORIGIN_NOT_TRUSTED = 'remote-web-origin-not-trusted'
 export type OpenAICodexWebAuthStatus =
   | { status: 'signed-out' }
   | { status: 'signing-in' }
-  | { status: 'reauth-required'; message: typeof OPENAI_CODEX_REAUTH_REQUIRED_MESSAGE }
-  | { status: 'signed-in'; usage: OpenAICodexUsage; quotaError?: string }
+  | { status: 'reauth-required'; message: typeof OPENAI_CODEX_REAUTH_REQUIRED_MESSAGE; accounts?: readonly OpenAICodexAccountSummary[]; activeAccountId?: string }
+  | { status: 'signed-in'; usage: OpenAICodexUsage; quotaError?: string; accounts?: readonly OpenAICodexAccountSummary[]; activeAccountId?: string }
   | { status: 'error'; message: string }
 
 interface LoginChallenge {
   url: string
+}
+
+interface AccountPoolActions {
+  listAccounts(): Promise<readonly unknown[]>
+  switchActive(id: string): Promise<void>
+  removeAccount(id: string): Promise<void>
+}
+
+function accountPoolActions(store: OpenAICodexCredentialSource): AccountPoolActions | undefined {
+  const value = store as OpenAICodexCredentialSource & Partial<AccountPoolActions>
+  return typeof value.listAccounts === 'function'
+    && typeof value.switchActive === 'function'
+    && typeof value.removeAccount === 'function'
+    ? value as AccountPoolActions
+    : undefined
 }
 
 /** Testable timing boundary; production uses the exported 30-second ceiling. */
@@ -91,7 +112,7 @@ export class OpenAICodexWebAuth {
   private readonly resolveProxyUrl: () => string | undefined
 
   constructor(
-    private readonly store: OpenAICodexCredentialStore,
+    private readonly store: OpenAICodexCredentialSource,
     options: OpenAICodexWebAuthOptions = {},
   ) {
     this.challengeTimeoutMs = options.challengeTimeoutMs ?? OPENAI_CODEX_AUTH_URL_TIMEOUT_MS
@@ -110,8 +131,8 @@ export class OpenAICodexWebAuth {
   }
 
   /** Start or join the current browser-login operation. */
-  async signIn(): Promise<LoginChallenge> {
-    if (this.operation === undefined) this.start()
+  async signIn(label?: string): Promise<LoginChallenge> {
+    if (this.operation === undefined) this.start(label)
     if (this.challenge !== undefined) return this.challenge
     return new Promise<LoginChallenge>((resolve, reject) => {
       this.challengeWaiters.push({ resolve, reject })
@@ -127,13 +148,29 @@ export class OpenAICodexWebAuth {
     this.state = { status: 'signed-out' }
   }
 
+  /** Select another stored account; the Harness session and its transcript are untouched. */
+  async selectAccount(id: string): Promise<void> {
+    const pool = accountPoolActions(this.store)
+    if (pool === undefined) throw new Error('OpenAI Codex account pool is unavailable')
+    await pool.switchActive(id)
+    this.state = await this.readStoredStatus()
+  }
+
+  /** Remove one stored account without affecting any Harness session history. */
+  async removeAccount(id: string): Promise<void> {
+    const pool = accountPoolActions(this.store)
+    if (pool === undefined) throw new Error('OpenAI Codex account pool is unavailable')
+    await pool.removeAccount(id)
+    this.state = await this.readStoredStatus()
+  }
+
   /** Stop the owned callback listener during plugin disposal. */
   async dispose(): Promise<void> {
     this.cancelSignIn(new Error('OpenAI Codex plugin disposed'))
     await this.operation?.catch(() => undefined)
   }
 
-  private start(): void {
+  private start(label?: string): void {
     const cancellation = new AbortController()
     this.cancellation = cancellation
     this.challenge = undefined
@@ -148,7 +185,7 @@ export class OpenAICodexWebAuth {
         ? Promise.resolve('browser')
         : waitForPromptAbort(prompt),
       notify: event => { this.onEvent(event) },
-    }, this.store)
+    }, this.store, label)
     this.operation = (this.proxyManager?.run(this.resolveProxyUrl(), login) ?? login()).then(
       async () => {
         if (this.challenge === undefined) {
@@ -199,10 +236,17 @@ export class OpenAICodexWebAuth {
       return {
         status: 'signed-in',
         usage: await (this.proxyManager?.run(this.resolveProxyUrl(), readUsage) ?? readUsage()),
+        ...stored.accounts === undefined ? {} : { accounts: stored.accounts },
+        ...stored.activeAccountId === undefined ? {} : { activeAccountId: stored.activeAccountId },
       }
     } catch (error: unknown) {
       if (isOpenAICodexReauthRequiredError(error)) {
-        return { status: 'reauth-required', message: OPENAI_CODEX_REAUTH_REQUIRED_MESSAGE }
+        return {
+          status: 'reauth-required',
+          message: OPENAI_CODEX_REAUTH_REQUIRED_MESSAGE,
+          ...stored.accounts === undefined ? {} : { accounts: stored.accounts },
+          ...stored.activeAccountId === undefined ? {} : { activeAccountId: stored.activeAccountId },
+        }
       }
       return { status: 'signed-in', usage: { rateLimits: [] }, quotaError: safeMessage(error) }
     }
@@ -408,17 +452,26 @@ function fastModeBody(value: unknown): { sessionId: string; enabled: boolean } |
     : undefined
 }
 
+function accountIdBody(value: unknown): { accountId: string } | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const accountId = record['accountId']
+  return Object.keys(record).length === 1 && typeof accountId === 'string' && /^acct-[a-f0-9]{24}$/u.test(accountId)
+    ? { accountId }
+    : undefined
+}
+
 /** Register the plugin-owned OAuth routes when the Web server is composed. */
 export function registerOpenAICodexAuthRoutes(
   ctx: Context,
-  store: OpenAICodexCredentialStore,
+  store: OpenAICodexCredentialSource,
   trustedOriginsOverride?: OpenAICodexTrustedOriginsStore,
   fastModeOverride?: FastModeRegistry,
   proxyManager?: OpenAICodexProxyManager,
   resolveProxyUrl?: () => string | undefined,
 ): void {
   const auth = new OpenAICodexWebAuth(store, { proxyManager, resolveProxyUrl })
-  const storedFilename = (store as OpenAICodexCredentialStore & { filename?: unknown }).filename
+  const storedFilename = (store as OpenAICodexCredentialSource & { filename?: unknown }).filename
   const fastMode = fastModeOverride ?? new FastModeRegistry()
   const trustedOrigins = trustedOriginsOverride ?? (typeof storedFilename === 'string'
     ? new OpenAICodexTrustedOriginsStore(join(dirname(storedFilename), OPENAI_CODEX_TRUSTED_ORIGINS_FILENAME))
@@ -464,6 +517,61 @@ export function registerOpenAICodexAuthRoutes(
             json(res, 200, { ok: true })
           } catch (error: unknown) {
             json(res, 500, { error: safeMessage(error) })
+          }
+        },
+      }),
+      ctx.webServer.register({
+        kind: 'exact',
+        path: OPENAI_CODEX_AUTH_ACCOUNTS_PATH,
+        handler: async (req, res) => {
+          if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
+          if (!await authorize(req, res)) return
+          try {
+            const status = await auth.status()
+            return json(res, 200, {
+              accounts: status.status === 'signed-in' ? status.accounts ?? [] : [],
+              ...status.status === 'signed-in' && status.activeAccountId !== undefined
+                ? { activeAccountId: status.activeAccountId }
+                : {},
+            })
+          } catch (error: unknown) {
+            return json(res, 500, { error: safeMessage(error) })
+          }
+        },
+      }),
+      ctx.webServer.register({
+        kind: 'exact',
+        path: OPENAI_CODEX_AUTH_ACCOUNT_SELECT_PATH,
+        handler: async (req, res) => {
+          if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
+          if (!await authorize(req, res)) return
+          const type = header(req, 'content-type')
+          if (type === undefined || !/^application\/json(?:\s*;|$)/iu.test(type.trim())) return json(res, 415, { error: 'unsupported content type' })
+          try {
+            const body = accountIdBody(await readFastModeBody(req))
+            if (body === undefined) return json(res, 400, { error: 'invalid input' })
+            await auth.selectAccount(body.accountId)
+            return json(res, 200, { ok: true })
+          } catch (error: unknown) {
+            return json(res, 400, { error: safeMessage(error) })
+          }
+        },
+      }),
+      ctx.webServer.register({
+        kind: 'exact',
+        path: OPENAI_CODEX_AUTH_ACCOUNT_REMOVE_PATH,
+        handler: async (req, res) => {
+          if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
+          if (!await authorize(req, res)) return
+          const type = header(req, 'content-type')
+          if (type === undefined || !/^application\/json(?:\s*;|$)/iu.test(type.trim())) return json(res, 415, { error: 'unsupported content type' })
+          try {
+            const body = accountIdBody(await readFastModeBody(req))
+            if (body === undefined) return json(res, 400, { error: 'invalid input' })
+            await auth.removeAccount(body.accountId)
+            return json(res, 200, { ok: true })
+          } catch (error: unknown) {
+            return json(res, 400, { error: safeMessage(error) })
           }
         },
       }),

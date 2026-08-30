@@ -42,6 +42,7 @@ import { OpenAICodexProxyManager } from './provider-proxy.ts'
 import { OpenAICodexImageAssetStore } from './image-assets.ts'
 import {
   createOpenAICodexQuotaUsageReader,
+  createOpenAICodexQuotaAccountRotator,
   registerOpenAICodexQuotaRecovery,
 } from './quota-recovery.ts'
 import { registerPersistCommand } from './persist.ts'
@@ -102,7 +103,7 @@ import {
 } from './search.ts'
 import type { OpenAICodexSearchContextSize, OpenAICodexSearchMode } from './search.ts'
 import type { OpenAICodexStreamTransport } from './settings-contract.ts'
-import { OpenAICodexCredentialStore, OPENAI_CODEX_PROVIDER } from './store.ts'
+import { OpenAICodexCredentialPool, OPENAI_CODEX_PROVIDER, openAICodexAuthPath } from './store.ts'
 import {
   DEFAULT_OPENAI_CODEX_PROXY_URL,
   DEFAULT_OPENAI_CODEX_TRANSPORT,
@@ -130,6 +131,7 @@ export type { OpenAICodexSettingsConfig, OpenAICodexStreamTransport } from './se
 export {
   cancellableOpenAICodexQuotaDelay,
   classifyOpenAICodexQuota,
+  createOpenAICodexQuotaAccountRotator,
   createOpenAICodexQuotaUsageReader,
   OPENAI_CODEX_FIVE_HOUR_WINDOW_SECONDS,
   OPENAI_CODEX_QUOTA_MAX_STALE_RESETS,
@@ -145,6 +147,11 @@ export type {
   OpenAICodexQuotaRecoveryOptions,
   OpenAICodexRequestErrorPayload,
 } from './quota-recovery.ts'
+export type {
+  OpenAICodexAccountState,
+  OpenAICodexAccountSummary,
+  OpenAICodexCredentialSource,
+} from './store.ts'
 export {
   foldPersistState,
   parsePersistCommand,
@@ -220,9 +227,13 @@ export {
 export type { OpenAICodexUpdateResult } from './update.ts'
 export {
   OpenAICodexCredentialStore,
+  OpenAICodexCredentialPool,
+  OPENAI_CODEX_ACCOUNT_DIRECTORY,
+  OPENAI_CODEX_ACCOUNT_POOL_FILENAME,
   OPENAI_CODEX_AUTH_FILENAME,
   OPENAI_CODEX_PROVIDER,
   openAICodexAuthPath,
+  openAICodexAccountPoolPath,
 } from './store.ts'
 export {
   DEFAULT_OPENAI_CODEX_SEARCH_CONTEXT_SIZE,
@@ -275,6 +286,8 @@ export interface Config {
   transport?: OpenAICodexStreamTransport
   /** Wait for the server-reported five-hour quota reset and retry the same step. */
   autoWaitForQuota?: boolean
+  /** Rotate between explicitly added ChatGPT accounts after weekly exhaustion. */
+  autoRotateAccounts?: boolean
   /**
    * Per-model context-window overrides keyed by catalog model id. Each value
    * replaces the advertised `contextWindow` for that model inside the adapter
@@ -305,6 +318,7 @@ export const Config: z<Config> = z.object({
   proxyUrl: z.string().default(DEFAULT_OPENAI_CODEX_PROXY_URL),
   transport: z.union(['sse', 'websocket', 'websocket-cached', 'auto'] as const).default(DEFAULT_OPENAI_CODEX_TRANSPORT),
   autoWaitForQuota: z.boolean().default(false),
+  autoRotateAccounts: z.boolean().default(false),
   contextWindowOverrides: z.transform(
     z.union([z.const(undefined), z.dict(z.union([z.const(null), z.number()]))]),
     parseOpenAICodexContextWindowOverrides,
@@ -336,13 +350,19 @@ export function apply(ctx: Context, config: Config): void {
   const proxyManager = new OpenAICodexProxyManager()
   const resolveProviderProxyUrl = (): string | undefined => resolveOpenAICodexProxyUrl(resolveOpenAICodexSettings(current()))
   let proxyWasActive = resolveProviderProxyUrl() !== undefined
-  const credentials = new OpenAICodexCredentialStore()
+  // Keep one provider id for pi-ai while persisting each ChatGPT account in
+  // its own owner-only file. The legacy single-account file is imported on
+  // first read, so existing installations keep their login and session data.
+  const credentials = new OpenAICodexCredentialPool()
   const imageAssets = new OpenAICodexImageAssetStore()
   const trustedOrigins = new OpenAICodexTrustedOriginsStore(
-    join(dirname(credentials.filename), OPENAI_CODEX_TRUSTED_ORIGINS_FILENAME),
+    // Keep the existing sidecar location stable while the account pool lives
+    // in its own directory. This preserves remote-origin approvals on upgrade.
+    join(dirname(openAICodexAuthPath()), OPENAI_CODEX_TRUSTED_ORIGINS_FILENAME),
   )
   const fastMode = new FastModeRegistry()
   const persist = registerPersistCommand(ctx)
+  const rotateQuotaAccount = createOpenAICodexQuotaAccountRotator(credentials, proxyManager, resolveProviderProxyUrl)
   assertNoOpenAICodexProviderConflict(ctx.llm.listProviders().map(provider => provider.id))
   new OpenAICodexTransport(ctx, credentials, proxyManager, resolveProviderProxyUrl)
   ctx.llm.registerAdapter(
@@ -487,12 +507,21 @@ export function apply(ctx: Context, config: Config): void {
   }, 'dsh-codex-connect: optional capability lifecycle')
 
   registerOpenAICodexQuotaRecovery(ctx, {
-    // `/persist` opts its own confirmed run into the existing, same-account
-    // five-hour wait/retry mechanism. Ordinary sessions retain the explicit
-    // autoWaitForQuota setting; weekly exhaustion never rotates credentials.
+    // `/persist` opts its own confirmed run into waiting and account
+    // rotation. Ordinary sessions retain explicit settings toggles.
     enabled: () => resolveOpenAICodexSettings(current()).autoWaitForQuota || persist.hasActiveWork(),
     readUsage: createOpenAICodexQuotaUsageReader(credentials, proxyManager, resolveProviderProxyUrl),
     logger: ctx.logger,
+    activeAccountId: () => credentials.activeAccountId(),
+    rotateAccount: (model, signal) => resolveOpenAICodexSettings(current()).autoRotateAccounts || persist.hasActiveWork()
+      ? rotateQuotaAccount(model, signal)
+      : Promise.resolve({ rotated: false }),
+    markWeeklyExhausted: async (resetAt, accountId) => {
+      const active = accountId ?? await credentials.activeAccountId()
+      if (active === undefined) return
+      await credentials.markAccountState(active, 'weekly-exhausted', resetAt === undefined ? {} : { weeklyResetAt: resetAt })
+    },
+    waitForWeeklyReset: () => resolveOpenAICodexSettings(current()).autoRotateAccounts || persist.hasActiveWork(),
   })
 
   installSettingsSection(ctx, OPENAI_CODEX_SETTINGS_NS, Config, config, {

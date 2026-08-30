@@ -70,6 +70,7 @@ const CONFIG_FIELDS = [
   'proxyUrl',
   'transport',
   'autoWaitForQuota',
+  'autoRotateAccounts',
   'enableSearch',
   'enableImageTool',
   'enableImageGeneration',
@@ -429,6 +430,17 @@ export function OpenAICodexConfiguration({ scope, t }: OpenAICodexConfigurationP
             <span style={toggleCopyStyle}>
               <span style={labelStyle}>{t('autoWaitForQuota')}</span>
               <span style={bodyStyle}>{t('autoWaitForQuotaHelp')}</span>
+            </span>
+          </label>
+          <label style={toggleRowStyle}>
+            <input
+              type="checkbox"
+              checked={draft.autoRotateAccounts}
+              onChange={event => { update('autoRotateAccounts', event.currentTarget.checked) }}
+            />
+            <span style={toggleCopyStyle}>
+              <span style={labelStyle}>{t('autoRotateAccounts')}</span>
+              <span style={bodyStyle}>{t('autoRotateAccountsHelp')}</span>
             </span>
           </label>
           <div style={{ paddingTop: 4 }}>

@@ -2,7 +2,7 @@
 
 import { createModels } from '@earendil-works/pi-ai'
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex'
-import type { OpenAICodexCredentialStore } from './store.ts'
+import type { OpenAICodexCredentialSource } from './store.ts'
 import { OPENAI_CODEX_PROVIDER } from './store.ts'
 
 /** Fixed endpoint used by the official Codex client for ChatGPT rate limits. */
@@ -223,7 +223,7 @@ export function parseOpenAICodexUsage(value: unknown): OpenAICodexUsage {
  * @returns current rate-limit buckets safe to expose to the local browser page.
  */
 export async function readOpenAICodexRateLimits(
-  store: OpenAICodexCredentialStore,
+  store: OpenAICodexCredentialSource,
 ): Promise<OpenAICodexUsage> {
   const models = createModels({ credentials: store })
   models.setProvider(openaiCodexProvider())

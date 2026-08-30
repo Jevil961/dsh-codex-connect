@@ -8,7 +8,7 @@ import { deepEqualJson } from '@deepseek-ai/dsh-settings'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
-import type { OpenAICodexCredentialStore } from './store.ts'
+import type { OpenAICodexCredentialSource } from './store.ts'
 import { OPENAI_CODEX_PROVIDER } from './store.ts'
 import type { FastModeRegistry } from './fast-mode.ts'
 import type { OpenAICodexModelCatalogEntry } from './model-contract.ts'
@@ -171,7 +171,7 @@ export function assertOpenAICodexContextWindowModelIds(
  * plugin supplies its provider-native OAuth token for each request.
  */
 export function createOpenAICodexAdapter(
-  credentials: OpenAICodexCredentialStore,
+  credentials: OpenAICodexCredentialSource,
   resolveAttachments: () => AttachmentStore | undefined,
   fastMode?: FastModeRegistry,
   visibleModelIds?: () => readonly string[] | undefined,

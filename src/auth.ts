@@ -6,7 +6,12 @@
 import { createModels } from '@earendil-works/pi-ai'
 import type { AuthInteraction } from '@earendil-works/pi-ai'
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex'
-import { OpenAICodexCredentialStore, OPENAI_CODEX_PROVIDER } from './store.ts'
+import {
+  OpenAICodexCredentialPool,
+  type OpenAICodexAccountSummary,
+  type OpenAICodexCredentialSource,
+  OPENAI_CODEX_PROVIDER,
+} from './store.ts'
 
 /** Non-secret login state shown by the launcher. */
 export interface OpenAICodexAuthStatus {
@@ -14,6 +19,10 @@ export interface OpenAICodexAuthStatus {
   authenticated: boolean
   /** Access-token expiry time; refresh is automatic on the next request. */
   expiresAt?: Date
+  /** Redacted account metadata when the pool has been enabled. */
+  accounts?: readonly OpenAICodexAccountSummary[]
+  /** Opaque id of the account used by new requests. */
+  activeAccountId?: string
 }
 
 /**
@@ -23,8 +32,18 @@ export interface OpenAICodexAuthStatus {
  */
 export async function loginOpenAICodex(
   interaction: AuthInteraction,
-  store: OpenAICodexCredentialStore = new OpenAICodexCredentialStore(),
+  store: OpenAICodexCredentialSource = new OpenAICodexCredentialPool(),
+  label?: string,
 ): Promise<void> {
+  // A pool must not let pi-ai's single-provider `models.login()` overwrite the
+  // currently active account. Complete the provider-native OAuth flow first,
+  // then atomically upsert/select the returned account document.
+  if (store instanceof OpenAICodexCredentialPool) {
+    const oauth = openaiCodexProvider().auth.oauth
+    if (oauth === undefined) throw new Error('OpenAI Codex OAuth is unavailable')
+    await store.addAccount(await oauth.login(interaction), label)
+    return
+  }
   const models = createModels({ credentials: store })
   models.setProvider(openaiCodexProvider())
   await models.login(OPENAI_CODEX_PROVIDER, 'oauth', interaction)
@@ -35,7 +54,7 @@ export async function loginOpenAICodex(
  * @param store - credential store, defaulting under `$DSH_HOME`.
  */
 export async function logoutOpenAICodex(
-  store: OpenAICodexCredentialStore = new OpenAICodexCredentialStore(),
+  store: OpenAICodexCredentialSource = new OpenAICodexCredentialPool(),
 ): Promise<void> {
   await store.delete(OPENAI_CODEX_PROVIDER)
 }
@@ -46,10 +65,20 @@ export async function logoutOpenAICodex(
  * @returns stored login state and expiry.
  */
 export async function openAICodexAuthStatus(
-  store: OpenAICodexCredentialStore = new OpenAICodexCredentialStore(),
+  store: OpenAICodexCredentialSource = new OpenAICodexCredentialPool(),
 ): Promise<OpenAICodexAuthStatus> {
   const credential = await store.read(OPENAI_CODEX_PROVIDER)
-  return credential?.type === 'oauth'
-    ? { authenticated: true, expiresAt: new Date(credential.expires) }
-    : { authenticated: false }
+  if (credential?.type !== 'oauth') {
+    const accounts = store instanceof OpenAICodexCredentialPool ? await store.listAccounts() : undefined
+    return accounts !== undefined && accounts.length > 0 ? { authenticated: true, accounts } : { authenticated: false }
+  }
+  if (!(store instanceof OpenAICodexCredentialPool)) return { authenticated: true, expiresAt: new Date(credential.expires) }
+  const accounts = await store.listAccounts()
+  const activeAccountId = await store.activeAccountId()
+  return {
+    authenticated: true,
+    expiresAt: new Date(credential.expires),
+    accounts,
+    ...activeAccountId === undefined ? {} : { activeAccountId },
+  }
 }

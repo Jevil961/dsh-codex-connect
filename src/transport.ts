@@ -9,7 +9,7 @@ import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-code
 import {
   OPENAI_CODEX_REAUTH_REQUIRED_CODE,
 } from './usage.ts'
-import type { OpenAICodexCredentialStore } from './store.ts'
+import type { OpenAICodexCredentialSource } from './store.ts'
 import { OPENAI_CODEX_PROVIDER } from './store.ts'
 import type { OpenAICodexProxyManager } from './provider-proxy.ts'
 
@@ -238,7 +238,7 @@ export class OpenAICodexTransport extends Service implements OpenAICodexTranspor
 
   constructor(
     ctx: Context,
-    private readonly credentials: OpenAICodexCredentialStore,
+    private readonly credentials: OpenAICodexCredentialSource,
     private readonly proxyManager?: OpenAICodexProxyManager,
     private readonly resolveProxyUrl: () => string | undefined = () => undefined,
   ) {

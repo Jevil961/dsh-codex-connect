@@ -11,7 +11,7 @@ import {
   loginOpenAICodex,
   logoutOpenAICodex,
   migrateOpenAICodexSearchHistory,
-  openAICodexAuthPath,
+  openAICodexAccountPoolPath,
   openAICodexAuthStatus,
 } from './index.ts'
 import { CODEX_CONNECT_VERSION } from './doctor.ts'
@@ -289,7 +289,7 @@ export async function run(argv: readonly string[]): Promise<number> {
       }
       case 'logout':
         await logoutOpenAICodex()
-        process.stdout.write(`Codex Connect: signed out; removed ${openAICodexAuthPath()}\n`)
+        process.stdout.write(`Codex Connect: signed out; removed the active account from ${openAICodexAccountPoolPath()}\n`)
         return 0
       case 'login': {
         const readline = createInterface({ input: process.stdin, output: process.stdout })
@@ -301,7 +301,7 @@ export async function run(argv: readonly string[]): Promise<number> {
         } finally {
           readline.close()
         }
-        process.stdout.write(`Codex Connect: signed in; credentials saved to ${openAICodexAuthPath()}\n`)
+        process.stdout.write(`Codex Connect: signed in; account pool updated at ${openAICodexAccountPoolPath()}\n`)
         return 0
       }
     }
