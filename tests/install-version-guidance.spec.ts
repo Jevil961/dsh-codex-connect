@@ -33,6 +33,6 @@ describe('installation version guidance', () => {
   })
 
   it('retains the exact Alpha 4.22 GitHub fallback when npm is unavailable', () => {
-    expect(install).toMatch(/npm is unavailable[^\n]*github:franksong2702\/dsh-codex-connect#v0\.1\.0-alpha\.4\.22/iu)
+    expect(install).toMatch(/npm is unavailable[^\n]*github:Jevil961\/dsh-codex-connect#v0\.1\.0-alpha\.4\.22/iu)
   })
 })

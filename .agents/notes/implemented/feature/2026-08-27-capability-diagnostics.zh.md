@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-[Issue #66](https://github.com/franksong2702/dsh-codex-connect/issues/66) 要求可执行地区分兼容性、凭据存在、路由访问与可选能力。现有 doctor 与更新卡提供有用的元数据，但不能证明模型执行成功。[Issue #64](https://github.com/franksong2702/dsh-codex-connect/issues/64) 记录了不兼容的 DSH 版本线；[Issue #65](https://github.com/franksong2702/dsh-codex-connect/issues/65) 说明 schema 识别不能证明 compaction 可用。
+[Issue #66](https://github.com/Jevil961/dsh-codex-connect/issues/66) 要求可执行地区分兼容性、凭据存在、路由访问与可选能力。现有 doctor 与更新卡提供有用的元数据，但不能证明模型执行成功。[Issue #64](https://github.com/Jevil961/dsh-codex-connect/issues/64) 记录了不兼容的 DSH 版本线；[Issue #65](https://github.com/Jevil961/dsh-codex-connect/issues/65) 说明 schema 识别不能证明 compaction 可用。
 
 ## Decision
 

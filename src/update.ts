@@ -2,10 +2,10 @@
 
 export const OPENAI_CODEX_PACKAGE_NAME = 'dsh-codex-connect'
 export const OPENAI_CODEX_NPM_METADATA_URL = `https://registry.npmjs.org/-/package/${OPENAI_CODEX_PACKAGE_NAME}/dist-tags`
-export const OPENAI_CODEX_RELEASE_API_BASE = 'https://api.github.com/repos/franksong2702/dsh-codex-connect/releases/tags/v'
-export const OPENAI_CODEX_RELEASE_PAGE_BASE = 'https://github.com/franksong2702/dsh-codex-connect/releases/tag/v'
-export const OPENAI_CODEX_UPDATE_HIGHLIGHTS_URL = 'https://raw.githubusercontent.com/franksong2702/dsh-codex-connect/main/update-highlights.json'
-export const OPENAI_CODEX_VERIFIED_COMPATIBILITY_URL = 'https://raw.githubusercontent.com/franksong2702/dsh-codex-connect/main/verified-compatibility.json'
+export const OPENAI_CODEX_RELEASE_API_BASE = 'https://api.github.com/repos/Jevil961/dsh-codex-connect/releases/tags/v'
+export const OPENAI_CODEX_RELEASE_PAGE_BASE = 'https://github.com/Jevil961/dsh-codex-connect/releases/tag/v'
+export const OPENAI_CODEX_UPDATE_HIGHLIGHTS_URL = 'https://raw.githubusercontent.com/Jevil961/dsh-codex-connect/main/update-highlights.json'
+export const OPENAI_CODEX_VERIFIED_COMPATIBILITY_URL = 'https://raw.githubusercontent.com/Jevil961/dsh-codex-connect/main/verified-compatibility.json'
 export const OPENAI_CODEX_UPDATE_TIMEOUT_MS = 8_000
 export const OPENAI_CODEX_UPDATE_MAX_METADATA_BYTES = 64 * 1024
 export const OPENAI_CODEX_UPDATE_MAX_HIGHLIGHTS_BYTES = 64 * 1024

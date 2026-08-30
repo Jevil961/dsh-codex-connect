@@ -56,7 +56,7 @@ describe('Codex Connect global update reminder', () => {
           latestPluginVersion: '0.1.0-alpha.4.15',
           latestDshVersion: '0.1.1-rc.2',
         },
-        releaseUrl: 'https://github.com/franksong2702/dsh-codex-connect/releases/tag/v0.1.0-alpha.4.15',
+        releaseUrl: 'https://github.com/Jevil961/dsh-codex-connect/releases/tag/v0.1.0-alpha.4.15',
         versionsBehind: 1,
         highlights: [
           { version: '0.1.0-alpha.4.12', kind: 'image-generation' },
@@ -64,7 +64,7 @@ describe('Codex Connect global update reminder', () => {
           { version: '0.1.0-alpha.4.20', kind: 'proxy-connection' },
         ],
         releaseName: 'Alpha 4.15',
-        releaseNotes: '## What changed\n- Manual upgrade command\n\n**Full Changelog**: https://github.com/franksong2702/dsh-codex-connect/compare/v0.1.0-alpha.4.14...v0.1.0-alpha.4.15',
+        releaseNotes: '## What changed\n- Manual upgrade command\n\n**Full Changelog**: https://github.com/Jevil961/dsh-codex-connect/compare/v0.1.0-alpha.4.14...v0.1.0-alpha.4.15',
       })
     })
     const writeText = vi.fn(async (): Promise<void> => undefined)

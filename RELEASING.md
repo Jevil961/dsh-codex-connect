@@ -54,7 +54,7 @@ Do not publish the npm version again. After confirming the npm readback, create
 the missing prerelease from the same commit with GitHub CLI:
 
 ```sh
-gh release create "v<version>" --repo franksong2702/dsh-codex-connect \
+gh release create "v<version>" --repo Jevil961/dsh-codex-connect \
   --prerelease --target <commit-sha> --generate-notes
 ```
 

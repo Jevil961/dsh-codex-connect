@@ -15,7 +15,7 @@ response, remediation, or disclosure time.
 
 Use a GitHub Private Security Advisory for a suspected vulnerability:
 
-<https://github.com/franksong2702/dsh-codex-connect/security/advisories/new>
+<https://github.com/Jevil961/dsh-codex-connect/security/advisories/new>
 
 Do not open a public issue or paste sensitive details into a pull request. Never
 include an OAuth authorization URL, authorization code, access or refresh token,

@@ -58,7 +58,7 @@ describe('Codex Connect update metadata', () => {
       currentVersion: '0.1.0-alpha.4.14',
       currentDshVersion: '0.1.1-rc.2',
       latestVersion: '0.1.0-alpha.4.16',
-      releaseUrl: 'https://github.com/franksong2702/dsh-codex-connect/releases/tag/v0.1.0-alpha.4.16',
+      releaseUrl: 'https://github.com/Jevil961/dsh-codex-connect/releases/tag/v0.1.0-alpha.4.16',
       highlights: [],
       compatibility: {
         status: 'compatible',

@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-[Issue #66](https://github.com/franksong2702/dsh-codex-connect/issues/66) requires actionable distinctions between compatibility, credential presence, route access, and optional capabilities. The existing doctor and update card provide useful metadata but cannot establish successful model execution. [Issue #64](https://github.com/franksong2702/dsh-codex-connect/issues/64) records an incompatible DSH release line; [Issue #65](https://github.com/franksong2702/dsh-codex-connect/issues/65) demonstrates why schema recognition cannot establish compaction support.
+[Issue #66](https://github.com/Jevil961/dsh-codex-connect/issues/66) requires actionable distinctions between compatibility, credential presence, route access, and optional capabilities. The existing doctor and update card provide useful metadata but cannot establish successful model execution. [Issue #64](https://github.com/Jevil961/dsh-codex-connect/issues/64) records an incompatible DSH release line; [Issue #65](https://github.com/Jevil961/dsh-codex-connect/issues/65) demonstrates why schema recognition cannot establish compaction support.
 
 ## Decision
 

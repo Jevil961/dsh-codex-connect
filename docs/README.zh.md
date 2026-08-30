@@ -7,7 +7,7 @@
 通过 OAuth 将你的 ChatGPT 订阅连接到 DeepSeek Harness，并可选择使用 GPT Image 生成图片，同时保留用户自主默认项、Harness 原生审批、非敏感诊断和可靠的会话恢复。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/franksong2702/dsh-codex-connect/main/docs/assets/zh/hero.jpg" alt="Codex Connect — 通过 ChatGPT OAuth 连接 DeepSeek Harness" width="100%">
+  <img src="https://raw.githubusercontent.com/Jevil961/dsh-codex-connect/main/docs/assets/zh/hero.jpg" alt="Codex Connect — 通过 ChatGPT OAuth 连接 DeepSeek Harness" width="100%">
 </p>
 
 `dsh-codex-connect` 提供 `openai-codex` 模型目录和独立的 ChatGPT OAuth 登录。模型仍走 Harness 标准 LLM 服务，因此流式输出、工具调用、reasoning replay、压缩、文件系统控制、权限门禁和审批提示仍由 Harness 负责。ChatGPT 订阅不会因此变成 OpenAI Platform API 凭据。选择符合条件的 GPT Codex 模型后，Composer 还会显示按对话绑定的 Fast Mode 开关和紧凑的周额度指示条。
@@ -28,7 +28,7 @@ dsh plugin --profile web add dsh-codex-connect@alpha
 
 预期结果：包被加入该 profile。这个动作不会更改 profile 的默认模型或全局搜索路由。
 
-如需精确复现这个版本，使用 `dsh plugin --profile web add dsh-codex-connect@0.1.0-alpha.4.22`。对应 GitHub prerelease 已创建但 npm 不可用时，可使用 `dsh plugin --profile web add 'github:franksong2702/dsh-codex-connect#v0.1.0-alpha.4.22'`。本地 checkout 可安装为 `link:/absolute/path/to/dsh-codex-connect`。
+如需精确复现这个版本，使用 `dsh plugin --profile web add dsh-codex-connect@0.1.0-alpha.4.22`。对应 GitHub prerelease 已创建但 npm 不可用时，可使用 `dsh plugin --profile web add 'github:Jevil961/dsh-codex-connect#v0.1.0-alpha.4.22'`。本地 checkout 可安装为 `link:/absolute/path/to/dsh-codex-connect`。
 
 ### Alpha 4.22 更新内容
 
@@ -91,7 +91,7 @@ dsh web
 预期结果：新安装时账户区显示 **尚未登录**，并出现 **使用 ChatGPT 登录** 按钮。之后管理可选能力也在同一张卡片中完成。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/franksong2702/dsh-codex-connect/main/docs/assets/zh/plugin-entry.jpg" alt="Harness 插件配置中的中文 Codex Connect 折叠入口" width="586">
+  <img src="https://raw.githubusercontent.com/Jevil961/dsh-codex-connect/main/docs/assets/zh/plugin-entry.jpg" alt="Harness 插件配置中的中文 Codex Connect 折叠入口" width="586">
 </p>
 
 ### 4. 使用 ChatGPT 登录
@@ -101,7 +101,7 @@ dsh web
 预期结果：账户区变为 **已登录**。下图展示的是完成本步骤后的成功状态，不是开始登录前的页面。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/franksong2702/dsh-codex-connect/main/docs/assets/zh/oauth-status.jpg" alt="Harness 插件配置中的中文 Codex Connect 已登录状态" width="720">
+  <img src="https://raw.githubusercontent.com/Jevil961/dsh-codex-connect/main/docs/assets/zh/oauth-status.jpg" alt="Harness 插件配置中的中文 Codex Connect 已登录状态" width="720">
 </p>
 
 ### 5. 选择模型并做一次安全检查
@@ -126,7 +126,7 @@ dsh web
 省略 `models` 时显示完整目录；空列表会在选择器中隐藏全部 Codex 模型，但不会禁用精确模型 ID 路由。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/franksong2702/dsh-codex-connect/main/docs/assets/zh/model-selector.jpg" alt="中文 DeepSeek Harness 模型选择器中的 OpenAI Codex 模型分组" width="360">
+  <img src="https://raw.githubusercontent.com/Jevil961/dsh-codex-connect/main/docs/assets/zh/model-selector.jpg" alt="中文 DeepSeek Harness 模型选择器中的 OpenAI Codex 模型分组" width="360">
 </p>
 
 如需在本机确认插件配置行，运行：
@@ -155,7 +155,7 @@ dsh plugin --profile web exec dsh-codex-connect doctor --json
 - 对于精确模型 `gpt-5.3-codex-spark`，Composer 读取 Spark 的每周额度；其他 GPT Codex 模型读取标准 Codex 周额度，两者是分开的额度桶。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/franksong2702/dsh-codex-connect/main/docs/assets/composer-capabilities.jpg" alt="DeepSeek Harness Composer 中按对话绑定的 Fast Mode 闪电控件和周额度进度条" width="820">
+  <img src="https://raw.githubusercontent.com/Jevil961/dsh-codex-connect/main/docs/assets/composer-capabilities.jpg" alt="DeepSeek Harness Composer 中按对话绑定的 Fast Mode 闪电控件和周额度进度条" width="820">
 </p>
 
 ## 可选能力（默认关闭）
@@ -208,7 +208,7 @@ Codex Connect 会把每个明确添加的 ChatGPT 账号保存到 `.openai-codex
 下图是有人显式开启能力之后的配置示例，不是新安装的默认状态。本中文指南使用中文本地化截图；English 版展示同一状态的英文截图。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/franksong2702/dsh-codex-connect/main/docs/assets/zh/plugin-configuration.jpg" alt="中文 Codex Connect 显式开启可选能力后的配置示例" width="550">
+  <img src="https://raw.githubusercontent.com/Jevil961/dsh-codex-connect/main/docs/assets/zh/plugin-configuration.jpg" alt="中文 Codex Connect 显式开启可选能力后的配置示例" width="550">
 </p>
 
 ### 使用 GPT Image 生成图片
@@ -223,7 +223,7 @@ Codex Connect 会把每个明确添加的 ChatGPT 账号保存到 `.openai-codex
 输出尺寸由订阅服务决定。工具只接受提示词，不提供尺寸设置，也不保证生成 4K 图片。要求“4K 级细节”不代表文件具有 4K 像素尺寸，请以结果卡片显示的尺寸为准。下载原文件会保留服务实际返回的图片，不会将其放大。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/franksong2702/dsh-codex-connect/main/docs/assets/zh/image-generation.png" alt="Codex Connect 中文 GPT Image 结果卡片，包含图片预览、可复制提示词、下载操作和图片详情" width="780">
+  <img src="https://raw.githubusercontent.com/Jevil961/dsh-codex-connect/main/docs/assets/zh/image-generation.png" alt="Codex Connect 中文 GPT Image 结果卡片，包含图片预览、可复制提示词、下载操作和图片详情" width="780">
 </p>
 
 图片的详细提示词由当前选择的 GPT 模型生成。Codex Connect 不会偷偷添加图片参数：它只校验“提示词”请求，并通过 ChatGPT 订阅提供的图片能力发送。服务返回的精确字节保存在 `$DSH_HOME/dsh-codex-connect/images/v1`；对话中使用的是另一份 DSH 附件预览，可能按照当前 DSH 附件策略缩放或重新编码。点击 **下载原文件** 得到的一定是插件保存的精确文件，**下载预览** 得到的是 DSH 表示。原文件仅允许文件所有者访问，下载前会校验完整性；创建图片的会话以及继承了该图片结果的 fork 会话均可下载，恢复会话后仍然有效。在该结果之前创建的 fork 会话和无关会话不能下载。关闭图片生成或卸载插件不会自动删除这些文件；通过结果卡片下载仍需安装插件。结果卡片里的提示词可以滚动查看和复制。点击 **再次尝试** 或 **再生成一张** 时，会重新发送这张卡片自己的提示词，不会因为后来出现了新的对话消息而误用最新上下文。点击 **基于此图修改** 时，模型会先询问你想改什么，再基于这张卡片的提示词继续处理。

@@ -22,11 +22,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/franksong2702/dsh-codex-connect.git"
+    "url": "git+https://github.com/Jevil961/dsh-codex-connect.git"
   },
-  "homepage": "https://github.com/franksong2702/dsh-codex-connect#readme",
+  "homepage": "https://github.com/Jevil961/dsh-codex-connect#readme",
   "bugs": {
-    "url": "https://github.com/franksong2702/dsh-codex-connect/issues"
+    "url": "https://github.com/Jevil961/dsh-codex-connect/issues"
   },
   "type": "module",
   "engines": {
