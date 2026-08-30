@@ -55,7 +55,7 @@ Review the durable plan with:
 
 After confirmation the plugin uses Harness's persistent Goal rounds to continue the work, with a default cap of 256 verified rounds. Normal file, shell, network, browser, and approval policies remain authoritative. New feature, defect, UI, or UX ideas discovered during execution are emitted as an unapproved addendum and wait for another `/persist confirm`; they are not silently added to scope. Completion is recorded by the Harness Goal service, and the plan/state transitions remain in the Session log across restart and resume.
 
-Confirmed `/persist` runs opt into Codex Connect's existing same-account five-hour quota wait/retry path when the server supplies a future reset time. Weekly exhaustion is intentionally not an invisible credential rotation: the state reports `weekly quota exhausted`, the user selects an account/provider explicitly, and then runs `/persist resume`. This keeps account changes auditable and does not bypass approval or provider policy.
+Confirmed `/persist` runs opt into Codex Connect's same-account five-hour quota wait/retry path and its durable account-pool rotation when the server supplies the relevant reset data. Weekly exhaustion only considers accounts the user explicitly added, records the switch in the local audit trail, and retries the same failed step without replacing the Harness session. If every account is exhausted, `/persist` waits for the earliest known reset; missing reset data or a revoked account stops with an actionable state. This never buys credits, bypasses approvals, or changes provider policy.
 
 ### Version updates
 

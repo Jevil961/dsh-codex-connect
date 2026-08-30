@@ -55,7 +55,7 @@ dsh plugin --profile web add dsh-codex-connect@alpha
 
 确认后插件会使用 Harness 的持久 Goal 回合连续推进，默认最多 256 个已验证回合；普通的文件、Shell、网络、浏览器和审批策略仍然有效。执行中发现的额外功能、缺陷或 UI/体验创意不会静默加入范围：Agent 必须先输出待批准的 addendum，并等待再次 `/persist confirm`。任务完成时由 Harness Goal 标记完成，计划和每次状态转换都保留在 Session 日志中，重启或恢复会话后仍可继续。
 
-`/persist` 会自动使用本插件已有的 Codex 5 小时额度等待/重试路径（仅在服务端返回未来的重置时间时）。周额度耗尽时不会在后台偷换 OAuth 凭据；状态会明确显示为 `weekly quota exhausted`，请在 Harness 中手动切换账号/Provider 后运行 `/persist resume`。这避免了不可审计的账号切换，也不会绕过审批或服务条款。
+确认后的 `/persist` 会使用 Codex 5 小时额度等待/重试和持久化账号池切换（仅在服务端返回相应的未来重置时间时）。周额度耗尽时只会考虑你明确添加的账号，切换会写入本地审计记录，并在不重建 Harness 会话的情况下重试同一个失败步骤。所有账号都耗尽且有已知重置时间时，`/persist` 会等待最早的重置；缺少重置数据或账号失效时会停在可处理的状态。本功能不会购买额度、绕过审批或改变 Provider 策略。
 
 ### 版本更新提醒
 
