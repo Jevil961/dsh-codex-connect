@@ -333,15 +333,21 @@ export function createOpenAICodexQuotaAccountRotator(
     let earliestResetAt: number | undefined
     let unknownCandidate: string | undefined
     for (const account of accounts) {
-      if (signal.aborted || account.id === active || account.state === 'disabled' || account.state === 'reauth-required') continue
+      if (signal.aborted) continue
+      const unavailable = account.state === 'disabled' || account.state === 'reauth-required'
+      if (unavailable) continue
       const nowSeconds = Date.now() / 1_000
       if (account.weeklyResetAt !== undefined && account.weeklyResetAt > nowSeconds) {
         earliestResetAt = earliestResetAt === undefined ? account.weeklyResetAt : Math.min(earliestResetAt, account.weeklyResetAt)
-        continue
       }
       if (account.fiveHourResetAt !== undefined && account.fiveHourResetAt > nowSeconds) {
         earliestResetAt = earliestResetAt === undefined ? account.fiveHourResetAt : Math.min(earliestResetAt, account.fiveHourResetAt)
       }
+      // The failed request's account is deliberately not probed again, but
+      // its just-recorded reset deadline must still participate in the
+      // all-accounts-exhausted wait (including a one-account pool).
+      if (account.id === active) continue
+      if (account.weeklyResetAt !== undefined && account.weeklyResetAt > nowSeconds) continue
       let usage: OpenAICodexUsage
       try {
         const candidate = await pool.storeForAccount(account.id)

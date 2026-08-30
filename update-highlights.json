@@ -72,6 +72,10 @@
     {
       "version": "0.1.0-alpha.4.22",
       "highlights": ["account-rotation"]
+    },
+    {
+      "version": "0.1.0-alpha.4.23",
+      "highlights": ["account-rotation"]
     }
   ]
 }

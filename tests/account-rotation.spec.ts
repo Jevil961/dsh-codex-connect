@@ -61,4 +61,21 @@ describe('Codex account rotation', () => {
       await proxy.dispose()
     }
   })
+
+  it('returns the active account reset when every account is exhausted', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-openai-account-rotation-'))
+    const pool = new OpenAICodexCredentialPool(join(root, 'legacy.json'), join(root, 'pool', 'accounts.json'))
+    await pool.addAccount(credential('account-one'))
+    const resetAt = Math.floor(Date.now() / 1_000) + 120
+    const active = await pool.activeAccountId()
+    expect(active).toBeDefined()
+    await pool.markAccountState(active!, 'weekly-exhausted', { weeklyResetAt: resetAt })
+    const proxy = new OpenAICodexProxyManager()
+    try {
+      const rotate = createOpenAICodexQuotaAccountRotator(pool, proxy, () => undefined)
+      await expect(rotate('gpt-5.6-sol', new AbortController().signal)).resolves.toEqual({ rotated: false, resetAt })
+    } finally {
+      await proxy.dispose()
+    }
+  })
 })
