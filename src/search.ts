@@ -41,6 +41,19 @@ export const OPENAI_CODEX_BASE_URL = 'https://chatgpt.com/backend-api/codex'
 /** Standalone search endpoint used by the official Codex client. */
 export const OPENAI_CODEX_SEARCH_URL = `${OPENAI_CODEX_BASE_URL}/alpha/search`
 
+/**
+ * Hard deadline for one standalone search, including response-body parsing.
+ *
+ * Search is a tool call inside a larger agent turn. Leaving the fetch
+ * unbounded lets a stalled proxy keep that turn alive forever, so the NAS
+ * profile uses a conservative finite deadline while still forwarding the
+ * caller's cancellation signal immediately.
+ */
+export const OPENAI_CODEX_SEARCH_REQUEST_TIMEOUT_MS = 60_000
+
+/** Maximum accepted standalone-search response body. */
+export const OPENAI_CODEX_SEARCH_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+
 interface SearchRequestBody {
   readonly id: string
   readonly model: string
@@ -224,6 +237,102 @@ function providerMessage(value: unknown): string | undefined {
   return raw?.replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '[REDACTED]').slice(0, 1000)
 }
 
+/** Preserve a typed provider error when bounded-body validation already made one. */
+function isWebProviderError(error: unknown): error is WebError {
+  return error instanceof WebError
+    && (error as unknown as Record<string, unknown>)['code'] === 'WEB_PROVIDER_ERROR'
+}
+
+/** Read a search response without allowing an upstream to exhaust the host. */
+async function readSearchResponseBody(response: Response): Promise<Uint8Array> {
+  const declared = response.headers.get('content-length')
+  if (declared !== null && /^\d+$/u.test(declared) && Number(declared) > OPENAI_CODEX_SEARCH_MAX_RESPONSE_BYTES) {
+    throw new WebError('OpenAI Codex search response exceeded the safe size limit', 'WEB_PROVIDER_ERROR')
+  }
+  if (response.body === null) return new Uint8Array()
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let length = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value === undefined) continue
+      length += value.byteLength
+      if (length > OPENAI_CODEX_SEARCH_MAX_RESPONSE_BYTES) {
+        try {
+          await reader.cancel()
+        } catch {
+          // The size failure remains authoritative even if the upstream closes first.
+        }
+        throw new WebError('OpenAI Codex search response exceeded the safe size limit', 'WEB_PROVIDER_ERROR')
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  const output = new Uint8Array(length)
+  let offset = 0
+  for (const chunk of chunks) {
+    output.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return output
+}
+
+/** Build a request-only signal so timeout and caller cancellation stay distinct. */
+function searchRequestSignal(parent: AbortSignal | undefined): {
+  signal: AbortSignal
+  didTimeout: () => boolean
+  dispose: () => void
+} {
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, OPENAI_CODEX_SEARCH_REQUEST_TIMEOUT_MS)
+  const onAbort = (): void => { controller.abort(parent?.reason) }
+  parent?.addEventListener('abort', onAbort, { once: true })
+  if (parent?.aborted === true) onAbort()
+  return {
+    signal: controller.signal,
+    didTimeout: () => timedOut,
+    dispose: () => {
+      clearTimeout(timer)
+      parent?.removeEventListener('abort', onAbort)
+    },
+  }
+}
+
+/** Resolve the account id, tolerating opaque access tokens after refresh. */
+async function accountIdFromTokenOrStore(
+  access: string,
+  credentials: OpenAICodexCredentialStore,
+  signal: AbortSignal | undefined,
+): Promise<string> {
+  try {
+    return accountIdFromToken(access)
+  } catch (tokenError: unknown) {
+    let stored
+    try {
+      stored = await abortable(credentials.read(OPENAI_CODEX_PROVIDER), signal)
+    } catch (error: unknown) {
+      throwIfSearchAborted(signal)
+      throw new WebError('OpenAI Codex search credential resolution failed', 'WEB_PROVIDER_ERROR', { cause: error })
+    }
+    const accountId = stored?.type === 'oauth' ? stored.accountId : undefined
+    if (typeof accountId === 'string' && accountId.length > 0) return accountId
+    throw new WebError(
+      'OpenAI Codex search credential has no usable account id; run "dsh openai-codex login" again',
+      'WEB_PROVIDER_CREDENTIAL_MISSING',
+      { cause: tokenError },
+    )
+  }
+}
+
 /** OpenAI Codex standalone-search provider using the same refreshable OAuth store as the LLM route. */
 export class OpenAICodexSearchProvider implements WebSearchProvider {
   readonly id = OPENAI_CODEX_SEARCH_PROVIDER
@@ -265,7 +374,7 @@ export class OpenAICodexSearchProvider implements WebSearchProvider {
     if (access === undefined || access.length === 0) {
       throw new WebError('OpenAI Codex search is signed out; run "dsh openai-codex login"', 'WEB_PROVIDER_CREDENTIAL_MISSING')
     }
-    const accountId = accountIdFromToken(access)
+    const accountId = await accountIdFromTokenOrStore(access, this.options.credentials, signal)
     throwIfSearchAborted(signal)
 
     const body: SearchRequestBody = {
@@ -287,49 +396,70 @@ export class OpenAICodexSearchProvider implements WebSearchProvider {
     this.options.recordRequest?.({ endpoint: OPENAI_CODEX_SEARCH_URL, body })
     throwIfSearchAborted(signal)
 
-    let response: Response
+    const requestSignal = searchRequestSignal(signal)
     try {
-      response = await fetch(OPENAI_CODEX_SEARCH_URL, {
-        method: 'POST',
-        redirect: 'error',
-        headers: {
-          authorization: `Bearer ${access}`,
-          'chatgpt-account-id': accountId,
-          'content-type': 'application/json',
-          accept: 'application/json',
-          originator: 'deepseek-harness',
-        },
-        body: JSON.stringify(body),
-        ...signal === undefined ? {} : { signal },
-      })
-    } catch (error: unknown) {
-      throwIfSearchAborted(signal)
-      if (isAbortError(error)) throw searchAborted(signal, error)
-      throw new WebError('OpenAI Codex search request failed', 'WEB_PROVIDER_ERROR', { cause: error })
-    }
+      let response: Response
+      try {
+        response = await fetch(OPENAI_CODEX_SEARCH_URL, {
+          method: 'POST',
+          redirect: 'error',
+          headers: {
+            authorization: `Bearer ${access}`,
+            'chatgpt-account-id': accountId,
+            'content-type': 'application/json',
+            accept: 'application/json',
+            originator: 'deepseek-harness',
+          },
+          body: JSON.stringify(body),
+          signal: requestSignal.signal,
+        })
+      } catch (error: unknown) {
+        throwIfSearchAborted(signal)
+        if (requestSignal.didTimeout()) {
+          throw new WebError(
+            `OpenAI Codex search timed out after ${OPENAI_CODEX_SEARCH_REQUEST_TIMEOUT_MS} ms`,
+            'WEB_PROVIDER_ERROR',
+            { cause: error },
+          )
+        }
+        if (isAbortError(error)) throw searchAborted(signal, error)
+        throw new WebError('OpenAI Codex search request failed', 'WEB_PROVIDER_ERROR', { cause: error })
+      }
 
-    let payload: unknown
-    try {
-      payload = await response.json()
-    } catch (error: unknown) {
-      throwIfSearchAborted(signal)
-      if (isAbortError(error)) throw searchAborted(signal, error)
-      throw new WebError(`OpenAI Codex returned an unprocessable search response (HTTP ${response.status})`, 'WEB_PROVIDER_ERROR', { cause: error })
+      let payload: unknown
+      try {
+        const bytes = await readSearchResponseBody(response)
+        payload = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown
+      } catch (error: unknown) {
+        throwIfSearchAborted(signal)
+        if (requestSignal.didTimeout()) {
+          throw new WebError(
+            `OpenAI Codex search timed out after ${OPENAI_CODEX_SEARCH_REQUEST_TIMEOUT_MS} ms`,
+            'WEB_PROVIDER_ERROR',
+            { cause: error },
+          )
+        }
+        if (isAbortError(error)) throw searchAborted(signal, error)
+        if (isWebProviderError(error)) throw error
+        throw new WebError(`OpenAI Codex returned an unprocessable search response (HTTP ${response.status})`, 'WEB_PROVIDER_ERROR', { cause: error })
+      }
+      if (!response.ok) {
+        const detail = providerMessage(payload)
+        const message = detail === undefined
+          ? `OpenAI Codex search failed (HTTP ${response.status})`
+          : `OpenAI Codex search failed (HTTP ${response.status}): ${detail}`
+        throw new WebError(
+          response.status === 401 || response.status === 403
+            ? `${message}; run "dsh openai-codex login" again`
+            : message,
+          response.status === 401 || response.status === 403
+            ? 'WEB_PROVIDER_CREDENTIAL_MISSING'
+            : 'WEB_PROVIDER_ERROR',
+        )
+      }
+      return mapOpenAICodexSearchResponse(payload)
+    } finally {
+      requestSignal.dispose()
     }
-    if (!response.ok) {
-      const detail = providerMessage(payload)
-      const message = detail === undefined
-        ? `OpenAI Codex search failed (HTTP ${response.status})`
-        : `OpenAI Codex search failed (HTTP ${response.status}): ${detail}`
-      throw new WebError(
-        response.status === 401 || response.status === 403
-          ? `${message}; run "dsh openai-codex login" again`
-          : message,
-        response.status === 401 || response.status === 403
-          ? 'WEB_PROVIDER_CREDENTIAL_MISSING'
-          : 'WEB_PROVIDER_ERROR',
-      )
-    }
-    return mapOpenAICodexSearchResponse(payload)
   }
 }

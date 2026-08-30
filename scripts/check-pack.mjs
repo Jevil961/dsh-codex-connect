@@ -1,7 +1,15 @@
 import { spawnSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 
-const result = spawnSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
+// `spawnSync('npm', ...)` resolves to npm.cmd on Windows shells, but Node's
+// direct process creation does not apply PATHEXT lookup. Use cmd.exe to invoke
+// the shim explicitly so the release contract also runs from Windows.
+const npmArguments = ['pack', '--dry-run', '--json', '--ignore-scripts']
+const npmExecutable = process.platform === 'win32' ? 'cmd.exe' : 'npm'
+const executableArguments = process.platform === 'win32'
+  ? ['/d', '/s', '/c', 'npm.cmd', ...npmArguments]
+  : npmArguments
+const result = spawnSync(npmExecutable, executableArguments, {
   cwd: new URL('..', import.meta.url),
   encoding: 'utf8',
 })

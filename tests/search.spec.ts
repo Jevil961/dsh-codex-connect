@@ -15,6 +15,7 @@ let context: Context | undefined
 let root: string | undefined
 
 afterEach(async () => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.unstubAllEnvs()
   await context?.fiber.dispose()
@@ -162,6 +163,65 @@ describe('OpenAI Codex standalone search request', () => {
       .rejects.toThrow(expect.objectContaining({ code: 'WEB_ABORTED' }))
     expect(read).not.toHaveBeenCalled()
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the persisted account id when a refreshed access token is opaque', async () => {
+    const store = await credentialStore()
+    await store.modify(OpenAICodex.OPENAI_CODEX_PROVIDER, current => {
+      if (current?.type !== 'oauth') throw new Error('expected OAuth credential')
+      return Promise.resolve({ ...current, access: 'opaque-access-token' })
+    })
+    const fetchMock = vi.fn(async () => jsonResponse(searchPayload))
+    vi.stubGlobal('fetch', fetchMock)
+    const search = new OpenAICodex.OpenAICodexSearchProvider({
+      credentials: store,
+      model: 'gpt-search-test',
+      mode: 'cached',
+      contextSize: 'medium',
+      maxOutputTokens: 1234,
+      resolveRequestId: () => 'session-search',
+    })
+
+    await expect(search.search({ query: 'opaque token account lookup' })).resolves.toMatchObject({
+      content: 'A synthesized answer.',
+    })
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(new Headers(init.headers).get('chatgpt-account-id')).toBe('account-from-store')
+  })
+
+  it('aborts a stalled request at the finite search deadline', async () => {
+    vi.useFakeTimers()
+    const entered = new Promise<void>(resolve => {
+      vi.stubGlobal('fetch', vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+        resolve()
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
+        })
+      }))
+    })
+    const search = await provider()
+    const pending = search.search({ query: 'stalled request' }).then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    await entered
+    await vi.advanceTimersByTimeAsync(OpenAICodex.OPENAI_CODEX_SEARCH_REQUEST_TIMEOUT_MS)
+    const failure = await pending
+    expect(failure).toEqual(expect.objectContaining({ code: 'WEB_PROVIDER_ERROR' }))
+    expect(String(failure)).toContain(`timed out after ${OpenAICodex.OPENAI_CODEX_SEARCH_REQUEST_TIMEOUT_MS} ms`)
+  })
+
+  it('bounds an oversized response before parsing it', async () => {
+    const search = await provider()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(OpenAICodex.OPENAI_CODEX_SEARCH_MAX_RESPONSE_BYTES + 1),
+      },
+    })))
+    await expect(search.search({ query: 'oversized response' }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_PROVIDER_ERROR' }))
   })
 })
 
