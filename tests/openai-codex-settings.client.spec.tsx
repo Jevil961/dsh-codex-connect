@@ -221,9 +221,35 @@ describe('OpenAI Codex Plugin configuration card', () => {
     expect(progress.getAttribute('aria-valuetext')).toBe('72.5% remaining')
     expect(screen.getByRole('progressbar', { name: `GPT-5.3-Codex-Spark · ${en.fiveHourLimit}` })).toBeTruthy()
     expect(screen.getByRole('progressbar', { name: `GPT-5.3-Codex-Spark · ${en.weeklyLimit}` })).toBeTruthy()
+    expect(screen.getByRole('button', { name: en.addAccount })).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: en.logout }))
     expect(await screen.findByText(en.signedOut)).toBeTruthy()
+  })
+
+  it('starts a second OAuth flow from the signed-in account state', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request): Promise<Response> => {
+      const path = requestPath(input)
+      if (path === OPENAI_CODEX_AUTH_STATUS_PATH) {
+        return json({
+          status: 'signed-in',
+          usage: { rateLimits: [] },
+          accounts: [{ id: 'account-1', label: 'Account 1', accountHint: '••••1234', active: true }],
+        })
+      }
+      expect(path).toBe(OPENAI_CODEX_AUTH_LOGIN_PATH)
+      return json({ url: 'https://auth.openai.com/authorize?prompt=login' })
+    })
+    const { popup, replace } = popupFixture()
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(window, 'open').mockReturnValue(popup)
+
+    render(<OpenAICodexSettings t={t} embedded />)
+    fireEvent.click(await screen.findByRole('button', { name: en.addAccount }))
+
+    await waitFor(() => { expect(replace).toHaveBeenCalledWith('https://auth.openai.com/authorize?prompt=login') })
+    expect(fetchMock.mock.calls.map(([input]) => requestPath(input))).toContain(OPENAI_CODEX_AUTH_LOGIN_PATH)
+    expect(popup.opener).toBeNull()
   })
 
   it('renders each quota window reset in the browser locale and names missing resets unavailable', async () => {

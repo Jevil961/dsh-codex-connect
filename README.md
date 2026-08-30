@@ -28,9 +28,11 @@ dsh plugin --profile web add dsh-codex-connect@alpha
 
 Expected result: the package is added to that profile. This does not change the profile's default model or global search route.
 
-To reproduce this release exactly, use `dsh plugin --profile web add dsh-codex-connect@0.1.0-alpha.4.23`. If npm is unavailable after the matching GitHub prerelease exists, use `dsh plugin --profile web add 'github:Jevil961/dsh-codex-connect#v0.1.0-alpha.4.23'`. A local checkout can be installed as `link:/absolute/path/to/dsh-codex-connect`.
+To reproduce this release exactly, use `dsh plugin --profile web add dsh-codex-connect@0.1.0-alpha.4.24`. If npm is unavailable after the matching GitHub prerelease exists, use `dsh plugin --profile web add 'github:Jevil961/dsh-codex-connect#v0.1.0-alpha.4.24'`. A local checkout can be installed as `link:/absolute/path/to/dsh-codex-connect`.
 
-### What's new in Alpha 4.23
+### What's new in Alpha 4.24
+
+- Expose an explicit **Add another account** action while already signed in, so a second ChatGPT OAuth account can be added without signing out or replacing the active account. The durable account list remains available for switching and removal.
 
 - When every configured account is exhausted, `/persist` now waits for the earliest known reset—including the active account—and does not resurrect an intentionally empty pool after restart.
 - Preserve and download the exact generated image separately from the conversation preview, including from restored sessions and forks that inherited the image result.
@@ -344,7 +346,7 @@ This report covers only the standalone finite-SSE route, not active profile rout
 
 ## Compatibility and security boundary
 
-- The only verified compatibility combination is DSH plugin API packages `0.1.1-rc.2`, `@earendil-works/pi-ai` `0.82.1`, and Node.js `^22.19.0 || >=24.0.0`; see [compatibility.json](compatibility.json). Alpha 4.23 uses the rc.2 keyed Plugin configuration slot; users of older DSH API packages should upgrade to the rc.2 API packages.
+- The only verified compatibility combination is DSH plugin API packages `0.1.1-rc.2`, `@earendil-works/pi-ai` `0.82.1`, and Node.js `^22.19.0 || >=24.0.0`; see [compatibility.json](compatibility.json). Alpha 4.24 uses the rc.2 keyed Plugin configuration slot; users of older DSH API packages should upgrade to the rc.2 API packages.
 - Upgrade the DSH plugin API packages and `@earendil-works/pi-ai` as one group, then run `dsh-codex-connect doctor --json` and the compatibility check again. This contract does not make claims about future versions.
 - When the daily upstream check finds a new `latest` or `next` DSH candidate, it installs Codex Connect into an isolated profile, boots the installed model runtime without OAuth credentials, verifies model and reasoning-effort discovery, and confirms provider disposal. Live sign-in, quota, and model requests still require manual validation in the test profile.
 - ChatGPT plan eligibility, model access, quotas, and backend behavior are controlled by OpenAI and may change.

@@ -388,7 +388,10 @@ export function OpenAICodexSettings({ t, configScope, updater, embedded = false 
           {status.status === 'loading' || status.status === 'remote-web-origin-not-trusted'
             ? null
             : status.status === 'signed-in'
-            ? <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void signOut() }}>{busy ? t('working') : t('logout')}</button>
+            ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <button type="button" style={primaryButtonStyle} disabled={busy} onClick={() => { void signIn() }}>{busy ? t('working') : t('addAccount')}</button>
+                <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void signOut() }}>{busy ? t('working') : t('logout')}</button>
+              </div>
             : status.status === 'signing-in' && loginUrl !== undefined
             ? null
             : <button type="button" style={primaryButtonStyle} disabled={busy} onClick={() => { void signIn() }}>{busy ? t('working') : status.status === 'error' || status.status === 'reauth-required' ? t('loginAgain') : t('login')}</button>}
