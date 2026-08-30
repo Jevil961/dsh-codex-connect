@@ -36,6 +36,25 @@ To reproduce this release exactly, use `dsh plugin --profile web add dsh-codex-c
 - Inspect runtime and Responses/SSE evidence with the opt-in `capabilities` command. Network probing requires explicit `--probe`; it does not enable unsupported features or alter routing.
 - Use clearer exact-version installation guidance and expanded release/canary CI checks. The supported DSH version remains `0.1.1-rc.2`.
 
+### `/persist`: plan first, then keep working
+
+This release also registers `/persist` in Harness's native command palette. `/persist <objective>` starts a read-only planning turn that researches the referenced product or convention when needed, identifies pain points, scope, acceptance criteria, implementation and test work, UI/UX/accessibility/performance concerns, deployment and rollback risks, and asks every decision that can change the result. It must not write files, run mutating commands, commit, or change browser state during planning.
+
+Review the durable plan with:
+
+```text
+/persist                 # show the current plan and state
+/persist answer <answer> # answer planning questions and revise the plan
+/persist confirm        # explicitly approve before implementation starts
+/persist pause           # pause continuous execution
+/persist resume          # resume a paused or quota-waiting run
+/persist stop            # stop while retaining the plan and audit log
+```
+
+After confirmation the plugin uses Harness's persistent Goal rounds to continue the work, with a default cap of 256 verified rounds. Normal file, shell, network, browser, and approval policies remain authoritative. New feature, defect, UI, or UX ideas discovered during execution are emitted as an unapproved addendum and wait for another `/persist confirm`; they are not silently added to scope. Completion is recorded by the Harness Goal service, and the plan/state transitions remain in the Session log across restart and resume.
+
+Confirmed `/persist` runs opt into Codex Connect's existing same-account five-hour quota wait/retry path when the server supplies a future reset time. Weekly exhaustion is intentionally not an invisible credential rotation: the state reports `weekly quota exhausted`, the user selects an account/provider explicitly, and then runs `/persist resume`. This keeps account changes auditable and does not bypass approval or provider policy.
+
 ### Version updates
 
 Codex Connect checks public package metadata and this repository's `verified-compatibility.json` periodically through the DSH Web server. The same card reads the locally loaded DSH package version, shows it beside the latest DSH version recorded by this project, and evaluates the exact installed plugin and DSH version pair. Local version detection uses package metadata already available to the plugin and does not require a DSH Core change.

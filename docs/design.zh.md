@@ -6,6 +6,12 @@
 
 bundle patch 只插入 `llm-openai-codex`，不会写入 `agent-default-model` 或 `web.searchProvider`。`enableSearch`、`enableImageTool` 与 `autoWaitForQuota` 默认均为 `false`；关闭时不会注册对应可选服务。`autoWaitForQuota` 只在选中账号的 5 小时窗口返回未来 `resetAt` 时等待并重试同一个失败步骤；周额度为零、缺少重置时间或额度查询失败时停止/交给正常恢复，不会轮换凭据或购买额度。
 
+## `/persist` 工作流
+
+Codex Connect 通过 DSH 原生 `dsh-commands` 注册 `/persist`，不另建 Composer。目标、计划、问题、批准的补充项、额度等待和完成状态以 `persist/change` whole-value 事件写入 Session；恢复时从事件日志重新折叠。初始目标只触发只读规划回合，只有用户明确 `/persist confirm` 后才创建 `dsh-goal` 持久目标。目标回合由 Harness 的 Goal round driver 续跑，默认上限为 256 回合。
+
+规划提示要求覆盖痛点、范围、验收、测试、UI/UX、可访问性、性能、部署与回滚，并使用结构化 marker 让插件识别“需要回答问题”或“等待确认”。执行中发现的范围外创意必须以 addendum marker 暂停目标，等待再次确认；普通 Harness 工具与审批策略不被绕过。Codex 5 小时等待仅在已确认的 `/persist` 任务活动时自动启用，周额度耗尽只记录为可恢复状态，账号切换仍需用户显式选择。
+
 Host 将 `llm-openai-codex` 注册为插件自有的能力 settings namespace。DSH 的 `llm-pi-ai` catalog 持有 `openai-codex` 可配置 provider 目录条目，Codex Connect 只注册实际 adapter，不重复声明该条目。浏览器通过 Harness settings-scope transport 绑定插件 namespace，把账户、额度以及带保存/放弃的能力配置放在现有“插件配置”卡片中。带 revision 防护的逐字段写入不会覆盖无关设置；提交后会即时协调搜索与图片能力的注册状态，且绝不写入默认模型或全局搜索 namespace。
 
 profile 默认使用有限的 SSE。长驻 NAS 主机可以显式选择 `websocket`、`websocket-cached` 或 `auto`：前者复用连接但不复用缓存续接，中间项同时复用按 Session 的连接和续接上下文，后者允许固定版本的 pi-ai 在 WebSocket 建立或使用失败时回退到 SSE。传输方式随 profile snapshot 捕获，因此设置修改只作用于下一次请求，不会改变进行中的操作。

@@ -1,6 +1,7 @@
 import z from "@deepseek-ai/schemastery";
 import { AuthInteraction, Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { LlmFailure, ResolvedRetryPolicy } from "@deepseek-ai/dsh-llm";
+import { SessionEvent } from "@deepseek-ai/dsh-session";
 import "@deepseek-ai/dsh-tools";
 import { Context, Service } from "@deepseek-ai/cordis";
 import { WebSearchProvider, WebSearchRequest, WebSearchResult } from "@deepseek-ai/dsh-web";
@@ -576,6 +577,83 @@ declare function registerOpenAICodexQuotaRecovery(ctx: Context, options: OpenAIC
 /** Build a quota probe that follows the active Codex-only proxy scope. */
 declare function createOpenAICodexQuotaUsageReader(store: OpenAICodexCredentialStore, proxyManager: OpenAICodexProxyManager, resolveProxyUrl: () => string | undefined): () => Promise<OpenAICodexUsage>;
 //#endregion
+//#region src/persist.d.ts
+/** Version of the plugin-owned event payload. Increment on incompatible changes. */
+declare const PERSIST_CHANGE_VERSION: 1;
+/** Maximum amount of model text retained in the structured workflow event. */
+declare const PERSIST_PLAN_MAX_CHARS = 16000;
+declare const PERSIST_QUESTIONS_MAX_CHARS = 8000;
+declare const PERSIST_REASON_MAX_CHARS = 4000;
+/** The default safety bound for one confirmed run. */
+declare const PERSIST_DEFAULT_MAX_GOAL_ROUNDS = 256;
+type PersistPhase = 'planning' | 'needs-input' | 'awaiting-confirmation' | 'running' | 'waiting-quota' | 'weekly-exhausted' | 'paused' | 'complete' | 'stopped' | 'failed';
+/** Durable state of one `/persist` workflow. All fields are JSON-safe. */
+interface PersistState {
+  readonly phase: PersistPhase;
+  readonly objective: string;
+  readonly plan: string | null;
+  readonly questions: string | null;
+  readonly addendum: string | null;
+  readonly lastAnswer: string | null;
+  readonly reason: string | null;
+  readonly updatedAt: number;
+}
+/** Session event written after each accepted workflow transition. */
+interface PersistChange extends PersistState {
+  readonly kind: 'persist/change';
+  readonly version: typeof PERSIST_CHANGE_VERSION;
+}
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    /** Whole-value `/persist` state; the last change wins. */
+    'persist/change': PersistChange;
+  }
+}
+type PersistCommand = {
+  readonly kind: 'show';
+} | {
+  readonly kind: 'start';
+  readonly objective: string;
+} | {
+  readonly kind: 'confirm';
+} | {
+  readonly kind: 'answer';
+  readonly answer: string;
+} | {
+  readonly kind: 'pause';
+} | {
+  readonly kind: 'resume';
+} | {
+  readonly kind: 'stop';
+} | {
+  readonly kind: 'invalid';
+  readonly message: string;
+};
+/** Parse the command-owned grammar without interpreting an arbitrary objective. */
+declare function parsePersistCommand(rawInput: string): PersistCommand;
+/** Parsed plan markers emitted by the planning turn. */
+interface ParsedPersistPlan {
+  readonly plan: string;
+  readonly questions: string | null;
+}
+/** Parse the complete, explicit plan envelope. Partial/truncated envelopes are ignored. */
+declare function parsePersistPlan(text: string): ParsedPersistPlan | undefined;
+/** Parse an execution-time addendum and completion signal. */
+declare function parsePersistExecutionSignals(text: string): {
+  readonly addendum: string | null;
+  readonly done: boolean;
+};
+/** Replay the last valid whole-value state from a session log. */
+declare function foldPersistState(events: readonly SessionEvent[]): PersistState | undefined;
+/**
+ * Register the command and return a small hook used by Codex quota recovery.
+ * Persist work opts into the existing five-hour wait/retry path; it never
+ * selects another credential silently.
+ */
+declare function registerPersistCommand(ctx: Context): {
+  hasActiveWork: () => boolean;
+};
+//#endregion
 //#region src/proxy-paths.d.ts
 /** Node-free route constants shared by the Host and browser plugin halves. */
 /** Detect bounded local/environment proxy candidates without changing settings. */
@@ -807,4 +885,4 @@ declare const Config: z<Config>;
  */
 declare function apply(ctx: Context, config: Config): void;
 //#endregion
-export { COMPATIBILITY_CONTRACT, COMPATIBILITY_PACKAGES, COMPATIBILITY_SCHEMA_VERSION, type CompatibilityDetectionOptions, type CompatibilityEntry, type CompatibilityEvaluationInput, type CompatibilityPackageName, type CompatibilityReport, type CompatibilityStatus, Config, DEFAULT_OPENAI_CODEX_PROXY_URL, DEFAULT_OPENAI_CODEX_SEARCH_CONTEXT_SIZE, DEFAULT_OPENAI_CODEX_SEARCH_MAX_OUTPUT_TOKENS, DEFAULT_OPENAI_CODEX_SEARCH_MODE, DEFAULT_OPENAI_CODEX_SEARCH_MODEL, DEFAULT_OPENAI_CODEX_SETTINGS, DEFAULT_OPENAI_CODEX_TRANSPORT, DSH_PLUGIN_API_PACKAGES, FastModeRegistry, FastModeRegistry as OpenAICodexFastModeRegistry, type GeneratedImagePayload, IMAGE_GENERATE_TOOL_NAME, type ImageGenerationRequest, type ImageGenerationResponse, type ImageRequestContext, OPENAI_CODEX_AUTH_FILENAME, OPENAI_CODEX_BASE_URL, OPENAI_CODEX_FAST_MODE_MAX_SESSIONS, OPENAI_CODEX_FAST_MODE_MAX_SESSION_ID_LENGTH, OPENAI_CODEX_FAST_MODE_PATH, OPENAI_CODEX_FIVE_HOUR_WINDOW_SECONDS, OPENAI_CODEX_HISTORY_BACKUP_SUFFIX, OPENAI_CODEX_IMAGE_GENERATION_URL, OPENAI_CODEX_IMAGE_MAX_COUNT, OPENAI_CODEX_IMAGE_MAX_ERROR_BYTES, OPENAI_CODEX_IMAGE_MAX_RESPONSE_BYTES, OPENAI_CODEX_IMAGE_PROMPT_MAX_LENGTH, OPENAI_CODEX_IMAGE_REQUEST_TIMEOUT_MS, OPENAI_CODEX_LOCAL_PROXY_CANDIDATES, OPENAI_CODEX_PROVIDER, OPENAI_CODEX_PROXY_CANDIDATE_LIMIT, OPENAI_CODEX_PROXY_DETECT_PATH, OPENAI_CODEX_PROXY_PROBE_TIMEOUT_MS, OPENAI_CODEX_PROXY_PROBE_URL, OPENAI_CODEX_PROXY_TEST_PATH, OPENAI_CODEX_QUOTA_MAX_STALE_RESETS, OPENAI_CODEX_QUOTA_RESET_SKEW_MS, OPENAI_CODEX_QUOTA_WAIT_CHUNK_MS, OPENAI_CODEX_SEARCH_MAX_RESPONSE_BYTES, OPENAI_CODEX_SEARCH_MODEL_REQUEST_EVENT, OPENAI_CODEX_SEARCH_PROVIDER, OPENAI_CODEX_SEARCH_REQUEST_TIMEOUT_MS, OPENAI_CODEX_SEARCH_URL, OPENAI_CODEX_SETTINGS_NAMESPACE, OPENAI_CODEX_SETTINGS_NS, OPENAI_CODEX_TRANSPORT_API_VERSION, OPENAI_CODEX_TRANSPORT_ERROR_CODES, OPENAI_CODEX_TRANSPORT_SERVICE, OPENAI_CODEX_UPDATE_PATH, OPENAI_CODEX_USAGE_URL, OPENAI_CODEX_WEEKLY_WINDOW_SECONDS, type OpenAICodexAuthStatus, OpenAICodexCredentialStore, type OpenAICodexCredits, type OpenAICodexDiagnosticOptions, type OpenAICodexDiagnosticReport, type OpenAICodexHistoryMigrationFile, type OpenAICodexHistoryMigrationOptions, type OpenAICodexHistoryMigrationResult, type OpenAICodexIndividualLimit, OpenAICodexProxyManager, type OpenAICodexProxyProbeClassification, type OpenAICodexProxyProbeResult, type OpenAICodexQuotaDecision, type OpenAICodexQuotaRecoveryLogger, type OpenAICodexQuotaRecoveryOptions, type OpenAICodexRateLimit, type OpenAICodexRateLimitWindow, type OpenAICodexRequestErrorPayload, type OpenAICodexSearchContextSize, type OpenAICodexSearchMode, OpenAICodexSearchProvider, type OpenAICodexSearchProviderOptions, type OpenAICodexSearchRequestRecord, type OpenAICodexSettingsConfig, type OpenAICodexStreamTransport, OpenAICodexTransport, OpenAICodexTransportError, type OpenAICodexTransportErrorCode, type OpenAICodexTransportV1, type OpenAICodexUpdateResult, type OpenAICodexUsage, PI_AI_PACKAGE, SUPPORTED_DSH_PLUGIN_API_VERSION, SUPPORTED_NODE_RANGE, SUPPORTED_PI_AI_VERSION, VIEW_IMAGE_TOOL_NAME, apply, assertNoOpenAICodexProviderConflict, assessCompatibility, cancellableOpenAICodexQuotaDelay, checkForOpenAICodexUpdate, classifyOpenAICodexQuota, compareOpenAICodexVersions, createOpenAICodexQuotaUsageReader, decodeOpenAICodexSettings, detectCompatibility, detectOpenAICodexProxies, diagnoseOpenAICodex, evaluateCompatibility, inject, isFastModeSessionId, isOpenAICodexTransportError, isValidOpenAICodexContextWindowOverrides, isValidOpenAICodexProxyUrl, isValidOpenAICodexTransport, listOpenAICodexProxyCandidates, loginOpenAICodex, logoutOpenAICodex, mapOpenAICodexSearchResponse, migrateOpenAICodexSearchHistory, name, openAICodexAuthPath, openAICodexAuthStatus, openAICodexConflictMessage, openAICodexQuotaIdForModel, parseOpenAICodexUpdateResult, parseOpenAICodexUsage, parseOpenAICodexVersion, readOpenAICodexRateLimits, registerOpenAICodexQuotaRecovery, resolveOpenAICodexProxyUrl, resolveOpenAICodexSettings };
+export { COMPATIBILITY_CONTRACT, COMPATIBILITY_PACKAGES, COMPATIBILITY_SCHEMA_VERSION, type CompatibilityDetectionOptions, type CompatibilityEntry, type CompatibilityEvaluationInput, type CompatibilityPackageName, type CompatibilityReport, type CompatibilityStatus, Config, DEFAULT_OPENAI_CODEX_PROXY_URL, DEFAULT_OPENAI_CODEX_SEARCH_CONTEXT_SIZE, DEFAULT_OPENAI_CODEX_SEARCH_MAX_OUTPUT_TOKENS, DEFAULT_OPENAI_CODEX_SEARCH_MODE, DEFAULT_OPENAI_CODEX_SEARCH_MODEL, DEFAULT_OPENAI_CODEX_SETTINGS, DEFAULT_OPENAI_CODEX_TRANSPORT, DSH_PLUGIN_API_PACKAGES, FastModeRegistry, FastModeRegistry as OpenAICodexFastModeRegistry, type GeneratedImagePayload, IMAGE_GENERATE_TOOL_NAME, type ImageGenerationRequest, type ImageGenerationResponse, type ImageRequestContext, OPENAI_CODEX_AUTH_FILENAME, OPENAI_CODEX_BASE_URL, OPENAI_CODEX_FAST_MODE_MAX_SESSIONS, OPENAI_CODEX_FAST_MODE_MAX_SESSION_ID_LENGTH, OPENAI_CODEX_FAST_MODE_PATH, OPENAI_CODEX_FIVE_HOUR_WINDOW_SECONDS, OPENAI_CODEX_HISTORY_BACKUP_SUFFIX, OPENAI_CODEX_IMAGE_GENERATION_URL, OPENAI_CODEX_IMAGE_MAX_COUNT, OPENAI_CODEX_IMAGE_MAX_ERROR_BYTES, OPENAI_CODEX_IMAGE_MAX_RESPONSE_BYTES, OPENAI_CODEX_IMAGE_PROMPT_MAX_LENGTH, OPENAI_CODEX_IMAGE_REQUEST_TIMEOUT_MS, OPENAI_CODEX_LOCAL_PROXY_CANDIDATES, OPENAI_CODEX_PROVIDER, OPENAI_CODEX_PROXY_CANDIDATE_LIMIT, OPENAI_CODEX_PROXY_DETECT_PATH, OPENAI_CODEX_PROXY_PROBE_TIMEOUT_MS, OPENAI_CODEX_PROXY_PROBE_URL, OPENAI_CODEX_PROXY_TEST_PATH, OPENAI_CODEX_QUOTA_MAX_STALE_RESETS, OPENAI_CODEX_QUOTA_RESET_SKEW_MS, OPENAI_CODEX_QUOTA_WAIT_CHUNK_MS, OPENAI_CODEX_SEARCH_MAX_RESPONSE_BYTES, OPENAI_CODEX_SEARCH_MODEL_REQUEST_EVENT, OPENAI_CODEX_SEARCH_PROVIDER, OPENAI_CODEX_SEARCH_REQUEST_TIMEOUT_MS, OPENAI_CODEX_SEARCH_URL, OPENAI_CODEX_SETTINGS_NAMESPACE, OPENAI_CODEX_SETTINGS_NS, OPENAI_CODEX_TRANSPORT_API_VERSION, OPENAI_CODEX_TRANSPORT_ERROR_CODES, OPENAI_CODEX_TRANSPORT_SERVICE, OPENAI_CODEX_UPDATE_PATH, OPENAI_CODEX_USAGE_URL, OPENAI_CODEX_WEEKLY_WINDOW_SECONDS, type OpenAICodexAuthStatus, OpenAICodexCredentialStore, type OpenAICodexCredits, type OpenAICodexDiagnosticOptions, type OpenAICodexDiagnosticReport, type OpenAICodexHistoryMigrationFile, type OpenAICodexHistoryMigrationOptions, type OpenAICodexHistoryMigrationResult, type OpenAICodexIndividualLimit, OpenAICodexProxyManager, type OpenAICodexProxyProbeClassification, type OpenAICodexProxyProbeResult, type OpenAICodexQuotaDecision, type OpenAICodexQuotaRecoveryLogger, type OpenAICodexQuotaRecoveryOptions, type OpenAICodexRateLimit, type OpenAICodexRateLimitWindow, type OpenAICodexRequestErrorPayload, type OpenAICodexSearchContextSize, type OpenAICodexSearchMode, OpenAICodexSearchProvider, type OpenAICodexSearchProviderOptions, type OpenAICodexSearchRequestRecord, type OpenAICodexSettingsConfig, type OpenAICodexStreamTransport, OpenAICodexTransport, OpenAICodexTransportError, type OpenAICodexTransportErrorCode, type OpenAICodexTransportV1, type OpenAICodexUpdateResult, type OpenAICodexUsage, PERSIST_CHANGE_VERSION, PERSIST_DEFAULT_MAX_GOAL_ROUNDS, PERSIST_PLAN_MAX_CHARS, PERSIST_QUESTIONS_MAX_CHARS, PERSIST_REASON_MAX_CHARS, PI_AI_PACKAGE, type ParsedPersistPlan, type PersistChange, type PersistPhase, type PersistState, SUPPORTED_DSH_PLUGIN_API_VERSION, SUPPORTED_NODE_RANGE, SUPPORTED_PI_AI_VERSION, VIEW_IMAGE_TOOL_NAME, apply, assertNoOpenAICodexProviderConflict, assessCompatibility, cancellableOpenAICodexQuotaDelay, checkForOpenAICodexUpdate, classifyOpenAICodexQuota, compareOpenAICodexVersions, createOpenAICodexQuotaUsageReader, decodeOpenAICodexSettings, detectCompatibility, detectOpenAICodexProxies, diagnoseOpenAICodex, evaluateCompatibility, foldPersistState, inject, isFastModeSessionId, isOpenAICodexTransportError, isValidOpenAICodexContextWindowOverrides, isValidOpenAICodexProxyUrl, isValidOpenAICodexTransport, listOpenAICodexProxyCandidates, loginOpenAICodex, logoutOpenAICodex, mapOpenAICodexSearchResponse, migrateOpenAICodexSearchHistory, name, openAICodexAuthPath, openAICodexAuthStatus, openAICodexConflictMessage, openAICodexQuotaIdForModel, parseOpenAICodexUpdateResult, parseOpenAICodexUsage, parseOpenAICodexVersion, parsePersistCommand, parsePersistExecutionSignals, parsePersistPlan, readOpenAICodexRateLimits, registerOpenAICodexQuotaRecovery, registerPersistCommand, resolveOpenAICodexProxyUrl, resolveOpenAICodexSettings };

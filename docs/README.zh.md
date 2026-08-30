@@ -36,6 +36,25 @@ dsh plugin --profile web add dsh-codex-connect@alpha
 - 使用可选的 `capabilities` 命令检查运行环境与 Responses/SSE 的支持证据。网络探测必须显式传入 `--probe`；不会启用未支持的功能或修改路由。
 - 提供更清晰的精确版本安装指引，并扩展发布与 canary 的 CI 检查。支持的 DSH 版本仍为 `0.1.1-rc.2`。
 
+### `/persist`：先规划，再持续执行
+
+安装包含一个与 Harness 原生命令面板相同的 `/persist` 命令。输入 `/persist <目标>` 后，Agent 先进行只读理解/资料查阅，整理痛点、范围、验收条件、实现步骤、测试、UI/UX、可访问性、性能、部署和回滚，并通过结构化计划提出所有会影响实现的问题。此阶段不会开始写文件、运行变更命令、提交或改动浏览器状态。
+
+计划出现后请人工检查：
+
+```text
+/persist                 # 查看当前计划和状态
+/persist answer <回答>   # 回答规划问题并重新整理计划
+/persist confirm         # 明确批准后才开始执行
+/persist pause           # 暂停持续执行
+/persist resume          # 恢复已暂停/等待的执行
+/persist stop            # 停止执行但保留会话、计划和审计记录
+```
+
+确认后插件会使用 Harness 的持久 Goal 回合连续推进，默认最多 256 个已验证回合；普通的文件、Shell、网络、浏览器和审批策略仍然有效。执行中发现的额外功能、缺陷或 UI/体验创意不会静默加入范围：Agent 必须先输出待批准的 addendum，并等待再次 `/persist confirm`。任务完成时由 Harness Goal 标记完成，计划和每次状态转换都保留在 Session 日志中，重启或恢复会话后仍可继续。
+
+`/persist` 会自动使用本插件已有的 Codex 5 小时额度等待/重试路径（仅在服务端返回未来的重置时间时）。周额度耗尽时不会在后台偷换 OAuth 凭据；状态会明确显示为 `weekly quota exhausted`，请在 Harness 中手动切换账号/Provider 后运行 `/persist resume`。这避免了不可审计的账号切换，也不会绕过审批或服务条款。
+
 ### 版本更新提醒
 
 Codex Connect 会通过 DSH Web 服务定期检查公开的 npm 包信息，以及本仓库维护的 `verified-compatibility.json`。同一张卡片会读取本机实际加载的 DSH 软件包版本，与本项目记录的最新 DSH 版本并列显示，并对当前安装的插件版本和 DSH 版本这一组精确组合进行判断。本机版本检测只使用插件已经能够取得的软件包元数据，不要求 DSH Core 作出任何修改。

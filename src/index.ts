@@ -16,6 +16,8 @@ import type {} from '@deepseek-ai/dsh-web'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-fs'
+import type {} from '@deepseek-ai/dsh-commands'
+import type {} from '@deepseek-ai/dsh-goal'
 import { assertOpenAICodexContextWindowModelIds, createOpenAICodexAdapter, openAICodexModelCatalog } from './adapter.ts'
 import { registerOpenAICodexAuthRoutes } from './auth-routes.ts'
 import { registerOpenAICodexProxyRoutes } from './proxy-routes.ts'
@@ -42,6 +44,7 @@ import {
   createOpenAICodexQuotaUsageReader,
   registerOpenAICodexQuotaRecovery,
 } from './quota-recovery.ts'
+import { registerPersistCommand } from './persist.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -142,6 +145,19 @@ export type {
   OpenAICodexQuotaRecoveryOptions,
   OpenAICodexRequestErrorPayload,
 } from './quota-recovery.ts'
+export {
+  foldPersistState,
+  parsePersistCommand,
+  parsePersistExecutionSignals,
+  parsePersistPlan,
+  PERSIST_CHANGE_VERSION,
+  PERSIST_DEFAULT_MAX_GOAL_ROUNDS,
+  PERSIST_PLAN_MAX_CHARS,
+  PERSIST_QUESTIONS_MAX_CHARS,
+  PERSIST_REASON_MAX_CHARS,
+  registerPersistCommand,
+} from './persist.ts'
+export type { PersistChange, PersistPhase, PersistState, ParsedPersistPlan } from './persist.ts'
 
 export {
   isOpenAICodexTransportError,
@@ -326,6 +342,7 @@ export function apply(ctx: Context, config: Config): void {
     join(dirname(credentials.filename), OPENAI_CODEX_TRUSTED_ORIGINS_FILENAME),
   )
   const fastMode = new FastModeRegistry()
+  const persist = registerPersistCommand(ctx)
   assertNoOpenAICodexProviderConflict(ctx.llm.listProviders().map(provider => provider.id))
   new OpenAICodexTransport(ctx, credentials, proxyManager, resolveProviderProxyUrl)
   ctx.llm.registerAdapter(
@@ -470,7 +487,10 @@ export function apply(ctx: Context, config: Config): void {
   }, 'dsh-codex-connect: optional capability lifecycle')
 
   registerOpenAICodexQuotaRecovery(ctx, {
-    enabled: () => resolveOpenAICodexSettings(current()).autoWaitForQuota,
+    // `/persist` opts its own confirmed run into the existing, same-account
+    // five-hour wait/retry mechanism. Ordinary sessions retain the explicit
+    // autoWaitForQuota setting; weekly exhaustion never rotates credentials.
+    enabled: () => resolveOpenAICodexSettings(current()).autoWaitForQuota || persist.hasActiveWork(),
     readUsage: createOpenAICodexQuotaUsageReader(credentials, proxyManager, resolveProviderProxyUrl),
     logger: ctx.logger,
   })
