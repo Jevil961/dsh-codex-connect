@@ -31,9 +31,11 @@ describe('context-window request snapshots', () => {
       read: async () => ({ type: 'oauth', access: 'offline-test-access', refresh: 'offline-test-refresh', expires: Date.now() + 3_600_000 }),
     } as unknown as OpenAICodexCredentialStore
     const overrides = { 'gpt-5.6-sol': 350_000 }
-    const adapter = createOpenAICodexAdapter(credentials, () => undefined, undefined, undefined, undefined, undefined, () => overrides)
+    let transport: 'sse' | 'websocket-cached' = 'sse'
+    const adapter = createOpenAICodexAdapter(credentials, () => undefined, undefined, undefined, undefined, undefined, () => overrides, () => transport)
     const prepared = await adapter.prepareCall('openai-codex', 'gpt-5.6-sol')
     overrides['gpt-5.6-sol'] = 300_000
+    transport = 'websocket-cached'
     const current = await adapter.prepareCall('openai-codex', 'gpt-5.6-sol')
     const options = { provider: 'openai-codex', model: 'gpt-5.6-sol', messages: [], maxTokens: 1024 }
     for (const call of [prepared, current]) {
@@ -45,7 +47,7 @@ describe('context-window request snapshots', () => {
     }
     expect(observed).toEqual([
       { contextWindow: 350_000, maxTokens: 1024, transport: 'sse' },
-      { contextWindow: 300_000, maxTokens: 1024, transport: 'sse' },
+      { contextWindow: 300_000, maxTokens: 1024, transport: 'websocket-cached' },
     ])
   })
 })
